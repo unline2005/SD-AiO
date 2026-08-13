@@ -1,5 +1,0 @@
-tasks:
-  - name: derain_subset
-    data_root: /root/shared-nvme/data/10Rain_subset/
-    val_root:  /root/shared-nvme/data/10Rain_subset/
-    prompt: "a high quality clean image without rain streaks, clear visibility"
