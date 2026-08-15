@@ -16,3 +16,4 @@ swanlog/
 *.png
 .pytest_cache/
 .ruff_cache/
+*.egg-info/

@@ -36,6 +36,7 @@ include = ["sd_aio*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = ["ignore:urllib3 .* doesn't match a supported version"]
 
 [tool.ruff]
 line-length = 110

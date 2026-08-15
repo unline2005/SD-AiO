@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import torch
@@ -138,9 +139,11 @@ def make_tiny_sd_repo(tmp_path: Path) -> Path:
         vocab.setdefault(token, len(vocab))
     (tokenizer_dir / "vocab.json").write_text(json.dumps(vocab))
     (tokenizer_dir / "merges.txt").write_text("#version: 0.2\n")
-    CLIPTokenizer(str(tokenizer_dir / "vocab.json"), str(tokenizer_dir / "merges.txt")).save_pretrained(
-        tokenizer_dir
-    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        CLIPTokenizer(str(tokenizer_dir / "vocab.json"), str(tokenizer_dir / "merges.txt")).save_pretrained(
+            tokenizer_dir
+        )
 
     text_config = CLIPTextConfig(
         vocab_size=len(vocab),

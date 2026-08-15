@@ -86,12 +86,11 @@ def test_restore_training_requires_optimizer_state(tmp_path):
     checkpoint_dir = tmp_path / "checkpoint-00000001"
     checkpoint_dir.mkdir()
     checkpoint.save_model_weights(model, checkpoint_dir / checkpoint.WEIGHTS_NAME)
-    try:
+    with (
+        pytest.warns(UserWarning, match="optimizer.pt does not exist"),
+        pytest.raises(RuntimeError, match="All checkpoints failed"),
+    ):
         checkpoint.restore_training(model, torch.optim.AdamW(model.parameters()), None, checkpoint_dir)
-    except RuntimeError as exc:
-        assert "All checkpoints failed" in str(exc)
-    else:
-        raise AssertionError("expected RuntimeError")
 
 
 def test_ema_tracks_trainable_parameters_only():
