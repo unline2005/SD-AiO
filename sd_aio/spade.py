@@ -83,56 +83,12 @@ class Spade(nn.Module):
 
 
 class SpadeWrapper(nn.Module):
-    """Replaces a ResNet ``conv2``: conv output -> SPADE modulation."""
-
     def __init__(self, target_module: nn.Conv2d, condition_channels: int) -> None:
         super().__init__()
         self.target_module = target_module
-        self.spade = Spade(
-            output_channels=self.out_channels,
-            cond_input_channels=condition_channels,
-        )
+        base = getattr(target_module, "base_layer", target_module)
+        self.spade = Spade(base.out_channels, condition_channels)
         self.current_cond_feat: torch.Tensor | None = None
-
-    @property
-    def _base(self) -> nn.Module:
-        return getattr(self.target_module, "base_layer", self.target_module)
-
-    @property
-    def weight(self) -> nn.Parameter:
-        return self._base.weight
-
-    @property
-    def bias(self) -> nn.Parameter | None:
-        return self._base.bias
-
-    @property
-    def kernel_size(self) -> tuple[int, ...]:
-        return self._base.kernel_size
-
-    @property
-    def stride(self) -> tuple[int, ...]:
-        return self._base.stride
-
-    @property
-    def padding(self) -> tuple[int, ...]:
-        return self._base.padding
-
-    @property
-    def dilation(self) -> tuple[int, ...]:
-        return self._base.dilation
-
-    @property
-    def groups(self) -> int:
-        return self._base.groups
-
-    @property
-    def out_channels(self) -> int:
-        return self._base.out_channels
-
-    @property
-    def in_channels(self) -> int:
-        return self._base.in_channels
 
     def forward(self, input_tensor: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         if self.current_cond_feat is None:
@@ -141,32 +97,14 @@ class SpadeWrapper(nn.Module):
             hidden_states = self.target_module(input_tensor)
         else:
             hidden_states = self.target_module(input_tensor, *args, **kwargs)
-
         cond_feat = self.current_cond_feat.to(device=hidden_states.device, dtype=hidden_states.dtype)
         hidden_states = self.spade(hidden_states, cond_feat)
         self.current_cond_feat = None
         return hidden_states
 
-    @classmethod
-    def inject(cls, unet: nn.Module) -> list[SpadeWrapper]:
-        wrappers = []
-        for _, module in unet.named_modules():
-            if isinstance(module, ResnetBlock2D):
-                wrapper = cls(
-                    module.conv2,
-                    module.conv2.out_channels
-                    if not hasattr(module.conv2, "base_layer")
-                    else module.conv2.base_layer.out_channels,
-                )
-                module.conv2 = wrapper
-                wrappers.append(wrapper)
-        return wrappers
-
 
 class MultiScaleExtractor(nn.Module):
     """LQ image pyramid at UNet down/mid/up scales (latent 64/32/16/8)."""
-
-    C320, C640, C1280 = 320, 640, 1280
 
     def __init__(
         self,
@@ -241,7 +179,7 @@ class MultiScaleExtractor(nn.Module):
 
 
 class SpadeConditionModule(nn.Module):
-    """Spatial-only SPADE conditioning (registry key ``simple``)."""
+    """Spatial-only SPADE conditioning."""
 
     DOWN_KEYS: ClassVar[dict[int, str]] = {
         0: "C320",
@@ -265,18 +203,25 @@ class SpadeConditionModule(nn.Module):
         self.extractor = MultiScaleExtractor(backbone_type, channel_dims=channel_dims)
         self._scale_groups: dict[str, list[SpadeWrapper]] = {key: [] for key in self.DOWN_KEYS.values()}
         self.wrappers = nn.ModuleList()
-        self._hooked = False
 
     def setup(self, unet: nn.Module) -> None:
-        if self._hooked:
-            return
-        self._hooked = True
+        expected_channels = {
+            "C320": self.extractor.C320,
+            "C640": self.extractor.C640,
+            "C1280_Down": self.extractor.C1280,
+            "C1280_Mid": self.extractor.C1280,
+        }
 
         def hook(resnet: ResnetBlock2D, key: str) -> None:
             conv2 = getattr(resnet, "conv2", None)
             if conv2 is None:
                 return
             base = getattr(conv2, "base_layer", conv2)
+            if base.out_channels != expected_channels[key]:
+                raise ValueError(
+                    f"UNet conv2 channels ({base.out_channels}) do not match "
+                    f"condition_channels[{key}] ({expected_channels[key]})"
+                )
             wrapper = SpadeWrapper(conv2, base.out_channels)
             self._scale_groups[key].append(wrapper)
             self.wrappers.append(wrapper)
@@ -297,14 +242,14 @@ class SpadeConditionModule(nn.Module):
             for wrapper in wrappers:
                 wrapper.current_cond_feat = features[key]
 
-    def get_modulation(
+    def forward(
         self,
         lq_image: torch.Tensor,
         text_embedding: torch.Tensor | None = None,
         f_deg: torch.Tensor | None = None,
-    ) -> tuple[None, torch.Tensor | None]:
+    ) -> torch.Tensor | None:
         self.set_spatial_features(lq_image)
-        return None, text_embedding
+        return text_embedding
 
 
 class DegTextFusion(nn.Module):
@@ -320,7 +265,7 @@ class DegTextFusion(nn.Module):
 
 
 class DegAwareConditionModule(SpadeConditionModule):
-    """SPADE spatial modulation + degradation token for cross-attention (``deg-aware``)."""
+    """SPADE spatial modulation + degradation token for cross-attention."""
 
     def __init__(
         self,
@@ -332,16 +277,18 @@ class DegAwareConditionModule(SpadeConditionModule):
         super().__init__(backbone_type, channel_dims=channel_dims)
         self.text_fusion = DegTextFusion(inner_dim=inner_dim, text_dim=text_dim)
 
-    def get_modulation(
+    def forward(
         self,
         lq_image: torch.Tensor,
         text_embedding: torch.Tensor | None = None,
         f_deg: torch.Tensor | None = None,
-    ) -> tuple[None, torch.Tensor | None]:
-        self.set_spatial_features(lq_image)
-        if text_embedding is not None and f_deg is not None:
+    ) -> torch.Tensor | None:
+        text_embedding = super().forward(lq_image, text_embedding, f_deg)
+        if f_deg is None:
+            raise RuntimeError("deg-aware conditioning requires a degradation feature extractor")
+        if text_embedding is not None:
             text_embedding = self.text_fusion(f_deg, text_embedding)
-        return None, text_embedding
+        return text_embedding
 
 
 def _attach_unet_lora(unet: nn.Module, rank: int, strategy: str) -> None:
@@ -356,14 +303,28 @@ def _attach_unet_lora(unet: nn.Module, rank: int, strategy: str) -> None:
     unet.add_adapter(config, adapter_name="restoration")
 
 
-def _attach_vae_lora(vae: nn.Module, rank: int, part: Literal["encoder", "decoder"]) -> None:
-    config = LoraConfig(
-        r=rank,
-        lora_alpha=rank,
-        init_lora_weights="gaussian",
-        target_modules=rf"^{part}{VAE_LORA_TARGET}",
-    )
-    vae.add_adapter(config, adapter_name=f"restoration_{part}")
+def _attach_vae_lora(vae: nn.Module, encoder_rank: int = 0, decoder_rank: int = 0) -> None:
+    def attach(rank: int, pattern: str, name: str) -> None:
+        config = LoraConfig(
+            r=rank,
+            lora_alpha=rank,
+            init_lora_weights="gaussian",
+            target_modules=pattern,
+        )
+        vae.add_adapter(config, adapter_name=name)
+
+    if encoder_rank <= 0 and decoder_rank <= 0:
+        return
+    if encoder_rank == decoder_rank:
+        parts = "|".join(
+            part for part, rank in (("encoder", encoder_rank), ("decoder", decoder_rank)) if rank > 0
+        )
+        attach(encoder_rank, rf"^({parts}){VAE_LORA_TARGET}", "restoration")
+        return
+    if encoder_rank > 0:
+        attach(encoder_rank, rf"^encoder{VAE_LORA_TARGET}", "restoration_encoder")
+    if decoder_rank > 0:
+        attach(decoder_rank, rf"^decoder{VAE_LORA_TARGET}", "restoration_decoder")
 
 
 def _mark_lora_trainable(module: nn.Module) -> None:
@@ -372,11 +333,11 @@ def _mark_lora_trainable(module: nn.Module) -> None:
 
 
 def _sample_timestep(loss_cfg: OmegaConf) -> int:
-    timestep_cfg = loss_cfg.get("timestep", OmegaConf.create({"strategy": "fixed", "value": 100}))
-    if timestep_cfg.get("strategy", "fixed") == "range":
-        low, high = timestep_cfg["range"]
+    timestep_cfg = loss_cfg.timestep
+    if timestep_cfg.get("strategy") == "range":
+        low, high = timestep_cfg.range
         return int(torch.randint(int(low), int(high) + 1, (1,)).item())
-    return int(timestep_cfg.get("value", 100))
+    return int(timestep_cfg.value)
 
 
 class SpadeRestorer(nn.Module):
@@ -457,9 +418,10 @@ class SpadeRestorer(nn.Module):
     def decode_latent(self, latent: torch.Tensor) -> torch.Tensor:
         return self.vae.decode(latent / self.scaling_factor).sample.clamp(-1.0, 1.0)
 
-    @staticmethod
-    def eps_to_coeff(timesteps: torch.Tensor, scheduler: DDPMScheduler) -> torch.Tensor:
-        alphas = scheduler.alphas_cumprod.to(device=timesteps.device, dtype=torch.float32)[timesteps]
+    def _x0_coeff(self, timesteps: torch.Tensor) -> torch.Tensor:
+        alphas = self.noise_scheduler.alphas_cumprod.to(device=timesteps.device, dtype=torch.float32)[
+            timesteps
+        ]
         alphas = alphas.view(-1, 1, 1, 1)
         return ((1.0 - alphas) ** 0.5) / (alphas**0.5)
 
@@ -479,22 +441,13 @@ class SpadeRestorer(nn.Module):
         z_t = self.noise_scheduler.add_noise(z0, noise, timesteps)
 
         if self.condition_module is not None:
-            _, text_embedding = self.condition_module.get_modulation(lq_image, text_embedding, f_deg=f_deg)
-
+            text_embedding = self.condition_module(lq_image, text_embedding, f_deg=f_deg)
         if text_embedding is None:
             raise RuntimeError("SpadeRestorer.forward requires text_embedding")
         noise_pred = self.unet(z_t, timesteps, encoder_hidden_states=text_embedding).sample
-        coeff = self.eps_to_coeff(timesteps, self.noise_scheduler).to(device=z0.device, dtype=z0.dtype)
+        coeff = self._x0_coeff(timesteps).to(device=z0.device, dtype=z0.dtype)
         denoised = z0 + coeff * (noise - noise_pred)
         return self.decode_latent(denoised)
-
-    def sample(
-        self,
-        lq_image: torch.Tensor,
-        text_embedding: torch.Tensor,
-        timestep: int | None = None,
-    ) -> torch.Tensor:
-        return self.forward(lq_image, text_embedding, timestep=timestep)
 
 
 def _populate_prompt_embeddings(model: SpadeRestorer, tasks: list[dict[str, Any]]) -> None:
@@ -516,16 +469,14 @@ def _build_condition_module(cfg: OmegaConf, unet: nn.Module) -> nn.Module | None
     if condition_type == "none":
         return None
     backbone = str(configlib.required(cfg, "model.backbone_type"))
-    inner_dim = int(configlib.required(cfg, "model.cond_dim"))
-    text_dim = int(cfg.model.get("text_dim", 1024))
     channel_dims = tuple(int(dim) for dim in cfg.model.get("condition_channels", [320, 640, 1280]))
     if condition_type == "simple":
         module = SpadeConditionModule(backbone_type=backbone, channel_dims=channel_dims)
     elif condition_type in ("deg-aware", "deg_aware_sft"):
         module = DegAwareConditionModule(
             backbone_type=backbone,
-            inner_dim=inner_dim,
-            text_dim=text_dim,
+            inner_dim=int(configlib.required(cfg, "model.cond_dim")),
+            text_dim=int(cfg.model.get("text_dim", 1024)),
             channel_dims=channel_dims,
         )
     else:
@@ -563,7 +514,7 @@ def build_model(cfg: OmegaConf, device: torch.device | None = None) -> SpadeRest
         pretrained_encoder = PreRestoreEncoder(
             encoder=vae.encoder,
             block_out_channels=vae.config.block_out_channels,
-            cond_dim=int(model_cfg.get("cond_dim", 768)),
+            cond_dim=int(configlib.required(cfg, "model.cond_dim")),
             adaln_layers=list(model_cfg.get("adaln_layers", ["down2", "down3", "mid"])),
         )
         _load_pretrained_encoder(pretrained_encoder, model_cfg.pretrained_encoder_path)
@@ -578,19 +529,18 @@ def build_model(cfg: OmegaConf, device: torch.device | None = None) -> SpadeRest
             pretrained_encoder.encoder = get_peft_model(pretrained_encoder.encoder, lora_config)
             _mark_lora_trainable(pretrained_encoder)
 
-    if pretrained_encoder is None and vae_encoder_rank > 0:
-        _attach_vae_lora(vae, vae_encoder_rank, "encoder")
-        _mark_lora_trainable(vae)
-    if vae_decoder_rank > 0:
-        _attach_vae_lora(vae, vae_decoder_rank, "decoder")
+    if pretrained_encoder is None:
+        _attach_vae_lora(vae, vae_encoder_rank, vae_decoder_rank)
+    else:
+        _attach_vae_lora(vae, 0, vae_decoder_rank)
+    if vae_encoder_rank > 0 or vae_decoder_rank > 0:
         _mark_lora_trainable(vae)
 
     condition_module = _build_condition_module(cfg, unet)
-    needs_deg_extractor = condition_module is not None and isinstance(
+    needs_deg_extractor = pretrained_encoder is not None or isinstance(
         condition_module, DegAwareConditionModule
     )
-    needs_deg_extractor = needs_deg_extractor or pretrained_encoder is not None
-    deg_extractor = build_deg_extractor(cfg, device=None) if needs_deg_extractor else None
+    deg_extractor = build_deg_extractor(cfg) if needs_deg_extractor else None
 
     lpips_model = None
     if float(cfg.loss.get("lambda_lpips", 0.0)) > 0:
@@ -670,13 +620,11 @@ def eval_step(
     model: SpadeRestorer,
     raw_model: SpadeRestorer,
     batch: dict[str, Any],
-    cfg: OmegaConf,
 ) -> dict[str, Any]:
     text_embedding = raw_model.text_embedding_for(batch["task_name"])
     prediction = model(batch["lq"], text_embedding, timestep=raw_model.default_timestep)
     return {
         "pred": prediction,
         "gt": batch["gt"],
-        "lq": batch["lq"],
         "task_name": batch["task_name"],
     }

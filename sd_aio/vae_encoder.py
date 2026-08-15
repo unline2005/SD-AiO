@@ -53,13 +53,18 @@ class PreRestoreEncoder(nn.Module):
         super().__init__()
         self.encoder = copy.deepcopy(encoder)
         self.adaln = nn.ModuleDict()
-        self._adaln_layers = list(adaln_layers)
+        adaln_layers = list(adaln_layers)
+        if len(block_out_channels) != len(self.encoder.down_blocks):
+            raise ValueError(
+                f"block_out_channels ({len(block_out_channels)}) != "
+                f"encoder down_blocks ({len(self.encoder.down_blocks)})"
+            )
 
         # diffusers Encoder: the i-th down block outputs block_out_channels[i].
         channels = {f"down{i}": int(block_out_channels[i]) for i in range(len(block_out_channels))}
         channels["mid"] = int(block_out_channels[-1])
 
-        for name in self._adaln_layers:
+        for name in adaln_layers:
             if name not in channels:
                 raise ValueError(f"Unknown adaln layer {name}; expected one of {sorted(channels)}")
             self.adaln[name] = AdaIn(cond_dim, channels[name])
@@ -85,7 +90,7 @@ def _load_pretrained_encoder(model: PreRestoreEncoder, path: str | Path) -> None
     if path.suffix == ".safetensors":
         checkpoint.load_model_weights(model, path)
         return
-    state = torch.load(path, map_location="cpu", weights_only=False)
+    state = torch.load(path, map_location="cpu", weights_only=True)
     if "encoder" in state:
         state = state["encoder"]
     missing, unexpected = model.load_state_dict(state, strict=False)
@@ -102,7 +107,7 @@ def build_model(cfg: OmegaConf, device: torch.device | None = None) -> PreRestor
     vae = AutoencoderKL.from_pretrained(str(model_cfg.sd_path), subfolder="vae")
     vae.requires_grad_(False).eval()
 
-    deg_extractor = build_deg_extractor(cfg, device)
+    deg_extractor = build_deg_extractor(cfg)
     deg_extractor.requires_grad_(False).eval()
 
     model = PreRestoreEncoder(
@@ -113,7 +118,6 @@ def build_model(cfg: OmegaConf, device: torch.device | None = None) -> PreRestor
     )
     model.frozen_vae = vae
     model.deg_extractor = deg_extractor
-    model.scaling_factor = float(vae.config.scaling_factor)
 
     checkpoint_path = model_cfg.get("pretrained_encoder_path")
     if checkpoint_path:
@@ -176,18 +180,11 @@ def eval_step(
     model: PreRestoreEncoder,
     raw_model: PreRestoreEncoder,
     batch: dict[str, Any],
-    cfg: OmegaConf,
 ) -> dict[str, Any]:
-    lq = batch["lq"]
-    f_deg = raw_model.deg_extractor(lq)
-    z_lq_raw = model(lq, f_deg)
+    f_deg = raw_model.deg_extractor(batch["lq"])
+    z_lq_raw = model(batch["lq"], f_deg)
     z_mean = raw_model.frozen_vae.quant_conv(
         z_lq_raw.to(dtype=next(raw_model.frozen_vae.parameters()).dtype)
     )[:, :4]
     prediction = raw_model.frozen_vae.decode(z_mean).sample.clamp(-1.0, 1.0)
-    return {
-        "pred": prediction,
-        "gt": batch["gt"],
-        "lq": lq,
-        "task_name": batch["task_name"],
-    }
+    return {"pred": prediction, "gt": batch["gt"], "task_name": batch["task_name"]}

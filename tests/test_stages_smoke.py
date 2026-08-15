@@ -51,9 +51,7 @@ def test_classifier_protocol_loss_and_metrics():
     assert model.head.training
     assert not model.encoder.training
 
-    result = classifier.eval_step(
-        model, model, {"lq": images, "label": labels, "task_name": ["a", "b"]}, None
-    )
+    result = classifier.eval_step(model, model, {"lq": images, "label": labels, "task_name": ["a", "b"]})
     assert result["predictions"].shape == (2, 3)
     assert result["labels"].shape == (2, 3)
 
@@ -138,7 +136,7 @@ def test_spade_restorer_single_forward_train_eval_shared():
     loss, logs = stage.compute_loss(model, model, batch, cfg)
     assert "loss_l2" in logs
     loss.backward()
-    result = stage.eval_step(model, model, batch, cfg)
+    result = stage.eval_step(model, model, batch)
     assert result["pred"].shape == (1, 3, 64, 64)
 
 

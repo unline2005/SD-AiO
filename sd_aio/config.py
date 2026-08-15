@@ -64,11 +64,6 @@ def required(cfg: OmegaConf, dotted_key: str) -> Any:
     return value
 
 
-def get(cfg: OmegaConf, dotted_key: str, default: Any = None) -> Any:
-    value = OmegaConf.select(cfg, dotted_key, default=_MISSING)
-    return default if value is _MISSING else value
-
-
 def apply_overrides(cfg: OmegaConf, overrides: Iterable[str] | None) -> OmegaConf:
     if not overrides:
         return cfg

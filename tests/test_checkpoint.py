@@ -1,3 +1,4 @@
+import pytest
 import torch
 from safetensors.torch import save_file
 from torch import nn
@@ -23,10 +24,15 @@ def test_save_load_trainable_only_weights(tmp_path):
     path = checkpoint.save_model_weights(source, tmp_path / "weights.safetensors")
 
     target = CheckpointModel()
-    missing, unexpected = checkpoint.load_model_weights(target, path)
-    assert unexpected == []
-    assert all(name.startswith("frozen.") for name in missing)
+    checkpoint.load_model_weights(target, path)
     assert torch.allclose(target.trainable.weight, source.trainable.weight)
+
+
+def test_empty_checkpoint_raises(tmp_path):
+    model = CheckpointModel()
+    save_file({}, tmp_path / "empty.safetensors")
+    with pytest.raises(RuntimeError, match="empty"):
+        checkpoint.load_model_weights(model, tmp_path / "empty.safetensors")
 
 
 def test_unexpected_checkpoint_key_raises(tmp_path):
@@ -57,7 +63,6 @@ def test_checkpoint_layout_and_resume(tmp_path):
     saved = checkpoint.save_checkpoint(model, optimizer, None, 10, tmp_path)
     assert (saved / checkpoint.WEIGHTS_NAME).exists()
     assert (saved / checkpoint.OPTIMIZER_NAME).exists()
-    assert (saved / checkpoint.STATE_NAME).exists()
 
     restored = CheckpointModel()
     step, directory = checkpoint.restore_training(restored, optimizer, None, tmp_path)
@@ -76,6 +81,19 @@ def test_keep_last_checkpoints_prunes_old(tmp_path):
     assert names == ["checkpoint-00000030", "checkpoint-00000020"]
 
 
+def test_restore_training_requires_optimizer_state(tmp_path):
+    model = CheckpointModel()
+    checkpoint_dir = tmp_path / "checkpoint-00000001"
+    checkpoint_dir.mkdir()
+    checkpoint.save_model_weights(model, checkpoint_dir / checkpoint.WEIGHTS_NAME)
+    try:
+        checkpoint.restore_training(model, torch.optim.AdamW(model.parameters()), None, checkpoint_dir)
+    except RuntimeError as exc:
+        assert "All checkpoints failed" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
 def test_ema_tracks_trainable_parameters_only():
     model = CheckpointModel()
     ema = checkpoint.ModelEMA(model, decay=0.999)
@@ -84,3 +102,47 @@ def test_ema_tracks_trainable_parameters_only():
         model.trainable.weight.mul_(2.0)
     ema.update(model)
     assert not torch.allclose(ema.shadow["trainable.weight"], model.trainable.weight.detach())
+
+
+def test_ema_load_checks_missing_and_unexpected(tmp_path):
+    model = CheckpointModel()
+    ema = checkpoint.ModelEMA(model)
+    missing_file = tmp_path / "missing.safetensors"
+    save_file({"trainable.weight": ema.shadow["trainable.weight"]}, missing_file)
+    try:
+        ema.load_state_dict(missing_file)
+    except RuntimeError as exc:
+        assert "mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    unexpected_file = tmp_path / "unexpected.safetensors"
+    state = ema.state_dict()
+    state["extra.weight"] = torch.zeros(1)
+    save_file(state, unexpected_file)
+    try:
+        ema.load_state_dict(unexpected_file)
+    except RuntimeError as exc:
+        assert "mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_resolve_weights_path_ema_errors_are_explicit(tmp_path):
+    model = CheckpointModel()
+    checkpoint_dir = tmp_path / "checkpoint-00000001"
+    checkpoint_dir.mkdir()
+    checkpoint.save_model_weights(model, checkpoint_dir / checkpoint.WEIGHTS_NAME)
+
+    with pytest.raises(FileNotFoundError, match="use_ema"):
+        checkpoint.resolve_weights_path(checkpoint_dir, prefer_ema=True)
+    with pytest.raises(ValueError, match="use_ema"):
+        checkpoint.resolve_weights_path(checkpoint_dir / checkpoint.WEIGHTS_NAME, prefer_ema=True)
+
+
+def test_resolve_weights_path_prefers_final_ema(tmp_path):
+    model = CheckpointModel()
+    ema = checkpoint.ModelEMA(model)
+    checkpoint.save_final(model, tmp_path, ema=ema)
+    assert checkpoint.resolve_weights_path(tmp_path, prefer_ema=True).name == checkpoint.EMA_NAME
+    assert checkpoint.resolve_weights_path(tmp_path).name == checkpoint.WEIGHTS_NAME

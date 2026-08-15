@@ -15,13 +15,10 @@ eval-step).
 from __future__ import annotations
 
 import argparse
-import importlib
-import json
 import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 import torch
 from accelerate import Accelerator
@@ -41,18 +38,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--config", required=True, help="Stage YAML config")
     parser.add_argument("overrides", nargs="*", metavar="KEY=VALUE", help="OmegaConf dot-path overrides")
     return parser.parse_args(argv)
-
-
-def load_stage(stage_name: str) -> Any:
-    module_name = f"sd_aio.{stage_name}"
-    try:
-        return importlib.import_module(module_name)
-    except ModuleNotFoundError as exc:
-        if exc.name != module_name:
-            raise
-        raise ModuleNotFoundError(
-            f"Unknown stage {stage_name}; expected a module sd_aio/{stage_name}.py"
-        ) from exc
 
 
 def setup_logger(output_dir: Path, enabled: bool) -> logging.Logger:
@@ -91,7 +76,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     cfg = configlib.load_config(args.config, args.overrides)
     stage_name = str(cfg.stage)
-    stage = load_stage(stage_name)
+    stage = utils.load_stage(stage_name)
 
     log_with = cfg.trainer.get("log_with")
     accelerator = Accelerator(
@@ -111,10 +96,10 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("SD-AiO training | stage=%s | output=%s", stage_name, output_dir)
         logger.info("Config: %s", args.config)
 
-    model = stage.build_model(cfg, accelerator.device)
     train_loader, test_loaders = datalib.build_loaders(cfg, verbose=is_main)
-    if train_loader is None or len(train_loader) == 0:
+    if len(train_loader) == 0:
         raise RuntimeError("Train loader is empty; check cfg.data.train paths and batch size")
+    model = stage.build_model(cfg, accelerator.device)
 
     optimizer = stage.make_optimizer(model, cfg)
     scheduler = get_scheduler(
@@ -134,13 +119,7 @@ def main(argv: list[str] | None = None) -> None:
     global_step = 0
     resume_path = _resolve_resume_path(cfg)
     if resume_path is not None:
-        global_step, restored_dir = checkpoint.restore_training(
-            raw_model,
-            optimizer,
-            scheduler,
-            resume_path,
-            prefer_ema=bool(cfg.trainer.get("resume_use_ema", False)),
-        )
+        global_step, restored_dir = checkpoint.restore_training(raw_model, optimizer, scheduler, resume_path)
         if is_main:
             logger.info("Resumed from %s at step %d", restored_dir, global_step)
 
@@ -154,7 +133,7 @@ def main(argv: list[str] | None = None) -> None:
 
     weight_dtype = utils.weight_dtype_for(str(cfg.mixed_precision))
     eval_lpips = None
-    if bool(cfg.eval.get("compute_lpips", True)) and stage_name != "classifier":
+    if bool(cfg.eval.get("compute_lpips", True)) and stage_name != "classifier" and test_loaders and is_main:
         if getattr(raw_model, "lpips", None) is not None:
             eval_lpips = raw_model.lpips
         else:
@@ -175,9 +154,10 @@ def main(argv: list[str] | None = None) -> None:
     loss_value = 0.0
     start_time = time.time()
     finished_step = global_step
+    completed = False
 
     try:
-        for _epoch in range(1_000_000):
+        while global_step < max_steps:
             for batch in train_loader:
                 batch = utils.move_batch(batch, accelerator.device, weight_dtype)
                 with accelerator.accumulate(model):
@@ -242,20 +222,8 @@ def main(argv: list[str] | None = None) -> None:
                             report,
                             output_dir / "eval" / f"metrics_step_{global_step:08d}.json",
                         )
-                        with (output_dir / "metrics.jsonl").open("a") as metrics_file:
-                            metrics_file.write(
-                                json.dumps(
-                                    {
-                                        "step": global_step,
-                                        "task_metrics": report.task_metrics,
-                                        "overall": report.overall,
-                                    }
-                                )
-                                + "\n"
-                            )
                     accelerator.wait_for_everyone()
-                    if is_main:
-                        stage.set_train_mode(raw_model)
+                    stage.set_train_mode(raw_model)
 
                 if is_main and checkpoint_steps > 0 and global_step % checkpoint_steps == 0:
                     checkpoint.save_checkpoint(
@@ -271,8 +239,7 @@ def main(argv: list[str] | None = None) -> None:
 
                 if global_step >= max_steps:
                     break
-            if global_step >= max_steps:
-                break
+        completed = True
     finally:
         accelerator.wait_for_everyone()
         if is_main:
@@ -286,7 +253,7 @@ def main(argv: list[str] | None = None) -> None:
                     ema=ema,
                     keep_last=int(cfg.keep_last_checkpoints),
                 )
-            if test_loaders:
+            if completed and test_loaders:
                 report = run_eval(
                     stage,
                     model,
@@ -305,12 +272,13 @@ def main(argv: list[str] | None = None) -> None:
                     report,
                     output_dir / "eval" / f"metrics_step_{finished_step:08d}.json",
                 )
-            checkpoint.save_final(raw_model, output_dir, ema=ema)
-            logger.info(
-                "Training finished at step %d; final weights in %s/final",
-                finished_step,
-                output_dir,
-            )
+            if completed:
+                checkpoint.save_final(raw_model, output_dir, ema=ema)
+                logger.info(
+                    "Training finished at step %d; final weights in %s/final",
+                    finished_step,
+                    output_dir,
+                )
         accelerator.end_training()
 
 

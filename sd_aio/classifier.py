@@ -7,7 +7,7 @@ Self-contained module following the shared stage protocol::
     set_train_mode(model)
     set_eval_mode(model)
     compute_loss(model, raw_model, batch, cfg) -> (loss, logs)
-    eval_step(model, raw_model, batch, cfg) -> sample dict
+    eval_step(model, raw_model, batch) -> sample dict
 
 ``model`` is the accelerator-prepared model (DDP/autocast aware) and
 ``raw_model`` is its unwrapped counterpart used for attribute access.
@@ -68,10 +68,7 @@ class DegradationClassifier(nn.Module):
         self.feature_dim = int(self.encoder.config.hidden_size)
         self.head = ClassifierHead(self.feature_dim, num_classes, head_hidden_dim)
         if freeze_encoder:
-            self.freeze_encoder()
-
-    def freeze_encoder(self) -> None:
-        self.encoder.requires_grad_(False)
+            self.encoder.requires_grad_(False)
 
     def forward_features(self, pixel_values: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         outputs = self.encoder(pixel_values=pixel_values, output_hidden_states=True)
@@ -80,9 +77,6 @@ class DegradationClassifier(nn.Module):
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         return self.forward_features(pixel_values)[1]
-
-    def class_probabilities(self, logits: torch.Tensor) -> torch.Tensor:
-        return torch.softmax(logits, dim=-1)[:, :, 0]
 
 
 class DegFeatureExtractor(nn.Module):
@@ -101,8 +95,7 @@ class DegFeatureExtractor(nn.Module):
     ) -> None:
         super().__init__()
         self.classifier = classifier
-        self.inner_dim = int(inner_dim or classifier.feature_dim)
-        self.deg_embedding = nn.Parameter(torch.empty(num_classes, self.inner_dim))
+        self.deg_embedding = nn.Parameter(torch.empty(num_classes, int(inner_dim or classifier.feature_dim)))
         nn.init.orthogonal_(self.deg_embedding)
         self.deg_alpha = nn.Parameter(torch.tensor(10.0))
 
@@ -112,36 +105,27 @@ class DegFeatureExtractor(nn.Module):
 
     def forward_features(self, lq_images: torch.Tensor) -> torch.Tensor:
         classifier = self.classifier
-        classifier_dtype = next(classifier.parameters()).dtype
+        classifier_parameter = next(classifier.parameters())
         with torch.no_grad():
-            cls_token, logits = classifier.forward_features(lq_images.to(dtype=classifier_dtype))
-            probabilities = classifier.class_probabilities(logits).to(dtype=lq_images.dtype)
-            cls_token = cls_token.to(dtype=lq_images.dtype)
-        # Embedding projection stays differentiable when train_deg_embedding is enabled.
-        # Cast to the caller's dtype so the projection is safe both inside and
-        # outside an autocast region (Stage 2 calls this module directly).
-        embedding = self.deg_embedding.to(dtype=lq_images.dtype)
-        alpha = self.deg_alpha.to(dtype=lq_images.dtype)
+            cls_token, logits = classifier.forward_features(
+                lq_images.to(device=classifier_parameter.device, dtype=classifier_parameter.dtype)
+            )
+            cls_token = cls_token.to(device=lq_images.device, dtype=lq_images.dtype)
+            probabilities = torch.softmax(logits, dim=-1)[:, :, 0].to(
+                device=lq_images.device, dtype=lq_images.dtype
+            )
+        embedding = self.deg_embedding.to(device=lq_images.device, dtype=lq_images.dtype)
+        alpha = self.deg_alpha.to(device=lq_images.device, dtype=lq_images.dtype)
         return cls_token + alpha * (probabilities @ embedding)
 
     def forward(self, lq_images: torch.Tensor) -> torch.Tensor:
         return self.forward_features(lq_images)
 
 
-def focal_loss(
-    logits: torch.Tensor,
-    labels: torch.Tensor,
-    gamma: float = 2.0,
-    alpha: torch.Tensor | None = None,
-) -> torch.Tensor:
-    """Multi-label focal loss on the positive-class logit of each ``[B, C, 2]`` head."""
+def focal_loss(logits: torch.Tensor, labels: torch.Tensor, gamma: float = 2.0) -> torch.Tensor:
     logits = logits[..., 0]
     bce = F.binary_cross_entropy_with_logits(logits, labels.to(dtype=logits.dtype), reduction="none")
-    probability = torch.exp(-bce)
-    loss = (1.0 - probability) ** gamma * bce
-    if alpha is not None:
-        loss = loss * alpha.to(device=loss.device, dtype=loss.dtype)
-    return loss.mean()
+    return ((1.0 - torch.exp(-bce)) ** gamma * bce).mean()
 
 
 def compute_binary_metrics(predictions: torch.Tensor, labels: torch.Tensor) -> dict[str, Any]:
@@ -240,17 +224,15 @@ def eval_step(
     model: DegradationClassifier,
     raw_model: DegradationClassifier,
     batch: dict[str, Any],
-    cfg: OmegaConf,
 ) -> dict[str, Any]:
     logits = model(batch["lq"])
     return {
         "predictions": (logits[..., 0] > 0.0).long(),
         "labels": batch["label"].long(),
-        "task_name": batch["task_name"],
     }
 
 
-def build_deg_extractor(cfg: OmegaConf, device: torch.device | None = None) -> DegFeatureExtractor:
+def build_deg_extractor(cfg: OmegaConf) -> DegFeatureExtractor:
     """Build the frozen F_Deg extractor shared by Stage 2 and Stage 3."""
     model_cfg = cfg.model
     classifier = DegradationClassifier(
@@ -259,24 +241,22 @@ def build_deg_extractor(cfg: OmegaConf, device: torch.device | None = None) -> D
         freeze_encoder=True,
     )
     checkpoint_path = model_cfg.get("degradation_classifier_path")
-    if checkpoint_path:
-        checkpoint_path = Path(checkpoint_path)
-        if checkpoint_path.suffix == ".safetensors":
-            checkpoint.load_model_weights(classifier, checkpoint_path)
-        else:
-            state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-            missing, unexpected = classifier.load_state_dict(state, strict=False)
-            if unexpected:
-                raise RuntimeError(f"Classifier checkpoint has unexpected keys: {unexpected[:5]}")
-            if missing:
-                print(
-                    f"  [deg-extractor] classifier checkpoint missing {len(missing)} keys (frozen parts are fine)"
-                )
+    if checkpoint_path is None:
+        raise ValueError("model.degradation_classifier_path is required for F_Deg extraction")
+    checkpoint_path = Path(checkpoint_path)
+    if checkpoint_path.suffix == ".safetensors":
+        checkpoint.load_model_weights(classifier, checkpoint_path)
+    else:
+        state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        missing, unexpected = classifier.load_state_dict(state, strict=False)
+        trainable = {name for name, parameter in classifier.named_parameters() if parameter.requires_grad}
+        if unexpected or (trainable & set(missing)):
+            raise RuntimeError(
+                f"Classifier checkpoint mismatch: unexpected={unexpected[:5]} "
+                f"missing_trainable={sorted(trainable & set(missing))[:5]}"
+            )
 
-    inner_dim = model_cfg.get("cond_dim") or classifier.feature_dim
-    extractor = DegFeatureExtractor(classifier, int(model_cfg.num_deg_types), int(inner_dim))
+    extractor = DegFeatureExtractor(classifier, int(model_cfg.num_deg_types), int(model_cfg.cond_dim))
     extractor.classifier.requires_grad_(False).eval()
     extractor.set_trainable_embedding(bool(model_cfg.get("train_deg_embedding", False)))
-    if device is not None:
-        extractor = extractor.to(device)
     return extractor

@@ -28,7 +28,6 @@ trainer:
   num_images_save_eval: 10
   eval_num_samples: null
   resume_from: null
-  resume_use_ema: false
   log_with: null
   round_robin: false
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import Any
 
 import numpy as np
 import torch
@@ -72,10 +71,6 @@ class MetricAccumulator:
             if name in values and values[name] is not None:
                 self._values[task_name][name].append(float(values[name]))
 
-    def add_many(self, task_names: Sequence[str], rows: Sequence[dict[str, Any]]) -> None:
-        for task_name, row in zip(task_names, rows, strict=False):
-            self.add(str(task_name), row)
-
     def per_task(self) -> dict[str, dict[str, float]]:
         report: dict[str, dict[str, float]] = {}
         for task_name in sorted(self._values):
@@ -95,6 +90,3 @@ class MetricAccumulator:
             if values:
                 report[name] = float(np.mean(values))
         return report
-
-    def count(self) -> int:
-        return sum(len(values) for metrics in self._values.values() for values in metrics.values())

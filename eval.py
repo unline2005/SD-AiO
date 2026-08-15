@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any
 
 from accelerate import Accelerator
 
@@ -47,27 +46,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def load_stage(stage_name: str) -> Any:
-    import importlib
-
-    return importlib.import_module(f"sd_aio.{stage_name}")
-
-
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     cfg = configlib.load_config(args.config, args.overrides)
     if args.tile_size is not None:
         cfg.eval.tile_size = args.tile_size
-    stage = load_stage(str(cfg.stage))
+    stage = utils.load_stage(str(cfg.stage))
 
     accelerator = Accelerator(mixed_precision=str(cfg.mixed_precision))
     device = accelerator.device
-    model = stage.build_model(cfg, device)
-
     checkpoint_path = Path(args.checkpoint) if args.checkpoint else Path(cfg.output_dir)
     weights_path = checkpoint.resolve_weights_path(checkpoint_path, prefer_ema=args.use_ema)
     if accelerator.is_main_process:
         print(f"Loading weights from {weights_path}")
+
+    model = stage.build_model(cfg, device)
     checkpoint.load_model_weights(model, weights_path)
 
     model = accelerator.prepare(model)
@@ -75,52 +68,52 @@ def main(argv: list[str] | None = None) -> None:
     weight_dtype = utils.weight_dtype_for(str(cfg.mixed_precision))
     stage.set_eval_mode(raw_model)
 
-    if args.input is not None:
-        save_dir = Path(args.save_dir or (Path(cfg.output_dir) / "inference"))
-        paths, report = run_inference(
-            stage,
-            model,
-            raw_model,
-            cfg,
-            args.input,
-            save_dir,
-            device=device,
-            weight_dtype=weight_dtype,
-            prompt=args.prompt,
-            gt_dir=args.gt,
-        )
-        if accelerator.is_main_process:
+    if accelerator.is_main_process:
+        if args.input is not None:
+            save_dir = Path(args.save_dir or (Path(cfg.output_dir) / "inference"))
+            paths, report = run_inference(
+                stage,
+                model,
+                raw_model,
+                cfg,
+                args.input,
+                save_dir,
+                device=device,
+                weight_dtype=weight_dtype,
+                prompt=args.prompt,
+                gt_dir=args.gt,
+            )
             print(f"Saved {len(paths)} image(s) to {save_dir}")
             if report is not None:
                 print(report.text())
                 save_report(report, save_dir / "metrics.json")
-    else:
-        _, test_loaders = datalib.build_loaders(cfg, verbose=accelerator.is_main_process)
-        if not test_loaders:
-            raise RuntimeError("No test tasks in config and no --input provided")
-        eval_lpips = None
-        if bool(cfg.eval.get("compute_lpips", True)) and str(cfg.stage) != "classifier":
-            if getattr(raw_model, "lpips", None) is not None:
-                eval_lpips = raw_model.lpips
-            else:
-                eval_lpips = metrics.load_lpips(str(cfg.eval.get("lpips_net", "vgg")), device)
-        report = run_eval(
-            stage,
-            model,
-            raw_model,
-            test_loaders,
-            cfg,
-            device=device,
-            weight_dtype=weight_dtype,
-            lpips_fn=eval_lpips,
-            step=0,
-            output_dir=Path(cfg.output_dir),
-            save_images=True,
-            num_samples_per_task=args.num_samples,
-        )
-        if accelerator.is_main_process:
+        else:
+            _, test_loaders = datalib.build_loaders(cfg, verbose=True)
+            if not test_loaders:
+                raise RuntimeError("No test tasks in config and no --input provided")
+            eval_lpips = None
+            if bool(cfg.eval.get("compute_lpips", True)) and str(cfg.stage) != "classifier":
+                if getattr(raw_model, "lpips", None) is not None:
+                    eval_lpips = raw_model.lpips
+                else:
+                    eval_lpips = metrics.load_lpips(str(cfg.eval.get("lpips_net", "vgg")), device)
+            report = run_eval(
+                stage,
+                model,
+                raw_model,
+                test_loaders,
+                cfg,
+                device=device,
+                weight_dtype=weight_dtype,
+                lpips_fn=eval_lpips,
+                step=0,
+                output_dir=Path(cfg.output_dir),
+                save_images=True,
+                num_samples_per_task=args.num_samples,
+            )
             print(report.text())
             save_report(report, Path(cfg.output_dir) / "eval" / "metrics_standalone.json")
+    accelerator.wait_for_everyone()
     accelerator.end_training()
 
 

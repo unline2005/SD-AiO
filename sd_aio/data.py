@@ -73,10 +73,6 @@ def pair_images(task: dict[str, Any]) -> list[tuple[Path, Path]]:
     if (lq_sub is not None) != (gt_sub is not None):
         raise ValueError("lq_subdir and gt_subdir must be provided together")
 
-    # Online denoise datasets point LQ and GT at the same clean directory.
-    if lq_dir == gt_dir:
-        return [(p, p) for p in lq_files]
-
     if len(lq_files) != len(gt_files):
         raise ValueError(f"[{task.get('name', lq_root)}] LQ ({len(lq_files)}) != GT ({len(gt_files)})")
     gt_by_stem = {p.stem: p for p in gt_files}
@@ -108,12 +104,7 @@ def add_gaussian_noise(image: torch.Tensor, sigma: float, seed: int | None = Non
 
 
 def build_deg_types(task_entries: Sequence[dict[str, Any]]) -> list[str]:
-    seen: list[str] = []
-    for task in task_entries:
-        deg_type = task["deg_type"]
-        if deg_type not in seen:
-            seen.append(deg_type)
-    return seen
+    return list(dict.fromkeys(str(task["deg_type"]) for task in task_entries))
 
 
 class PairedTransform:
@@ -171,7 +162,6 @@ class PairedImageDataset(Dataset):
     def __init__(self, task: dict[str, Any], transform: PairedTransform) -> None:
         self.task_name = str(task["name"])
         self.deg_type = str(task["deg_type"])
-        self.prompt = str(task.get("prompt", ""))
         self.transform = transform
         self.repeat_ratio = max(1, int(task.get("repeat_ratio", 1) or 1))
 
@@ -257,7 +247,10 @@ class ClassificationDataset(Dataset):
             )
             sigma = 0.0
             if is_synthetic_noise:
-                sigma = float(task.get("noise_sigma") or parse_sigma_from_name(str(task["name"])) or 0.0)
+                if task.get("noise_sigma") is not None:
+                    sigma = float(task["noise_sigma"])
+                else:
+                    sigma = parse_sigma_from_name(str(task["name"])) or 0.0
                 if sigma <= 0:
                     raise ValueError(
                         f"Denoise classification task {task.get('name')} must end with "
@@ -272,7 +265,6 @@ class ClassificationDataset(Dataset):
                             "label": label,
                             "sigma": sigma,
                             "task_name": str(task["name"]),
-                            "deg_type": deg_type,
                         }
                     )
 
@@ -304,12 +296,7 @@ class ClassificationDataset(Dataset):
             if not self.training:
                 seed = zlib.crc32(f"{sample['task_name']}:{index}".encode()) & 0x7FFFFFFF
             lq = add_gaussian_noise(lq, sample["sigma"], seed=seed)
-        return {
-            "lq": lq,
-            "label": sample["label"],
-            "task_name": sample["task_name"],
-            "deg_type": sample["deg_type"],
-        }
+        return {"lq": lq, "label": sample["label"]}
 
 
 class RoundRobinSampler(Sampler[int]):
@@ -351,8 +338,6 @@ def _collate_classification(batch: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return {
         "lq": torch.stack([item["lq"] for item in batch]),
         "label": torch.stack([item["label"] for item in batch]),
-        "task_name": [item["task_name"] for item in batch],
-        "deg_type": [item["deg_type"] for item in batch],
     }
 
 
@@ -363,9 +348,7 @@ def _tasks(cfg: OmegaConf, split: str) -> list[dict[str, Any]]:
     return OmegaConf.to_container(node, resolve=True)
 
 
-def build_loaders(
-    cfg: OmegaConf, verbose: bool = True
-) -> tuple[DataLoader | None, OrderedDict[str, DataLoader]]:
+def build_loaders(cfg: OmegaConf, verbose: bool = True) -> tuple[DataLoader, OrderedDict[str, DataLoader]]:
     """Build train/test loaders for every stage.
 
     ``cfg.stage == "classifier"`` selects single-image classification loaders;
@@ -383,7 +366,6 @@ def build_loaders(
     if not test_tasks and verbose:
         print("  [data] no test tasks; training will continue without periodic eval")
 
-    train_loader: DataLoader | None = None
     test_loaders: OrderedDict[str, DataLoader] = OrderedDict()
 
     if stage == "classifier":

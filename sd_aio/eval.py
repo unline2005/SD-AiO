@@ -43,7 +43,7 @@ class EvalReport:
         return f"[eval step {self.step}] " + " | ".join(lines)
 
 
-def _crop_to_multiple(image: torch.Tensor, multiple: int) -> tuple[torch.Tensor, tuple[int, int, int, int]]:
+def _crop_to_multiple(image: torch.Tensor, multiple: int) -> torch.Tensor:
     _, _, height, width = image.shape
     crop_h = (height // multiple) * multiple
     crop_w = (width // multiple) * multiple
@@ -51,12 +51,16 @@ def _crop_to_multiple(image: torch.Tensor, multiple: int) -> tuple[torch.Tensor,
         raise ValueError(f"Image {image.shape} is smaller than eval.crop_to_multiple={multiple}")
     top = (height - crop_h) // 2
     left = (width - crop_w) // 2
-    return image[:, :, top : top + crop_h, left : left + crop_w], (
-        top,
-        left,
-        crop_h,
-        crop_w,
-    )
+    return image[:, :, top : top + crop_h, left : left + crop_w]
+
+
+def _limit_batch(batch: dict[str, Any], limit: int | None) -> dict[str, Any]:
+    if limit is None:
+        return batch
+    return {
+        key: value[:limit] if isinstance(value, (torch.Tensor, list, tuple)) else value
+        for key, value in batch.items()
+    }
 
 
 def _pad_to_multiple(image: torch.Tensor, multiple: int) -> torch.Tensor:
@@ -97,7 +101,6 @@ def _run_classifier_eval(
     model: torch.nn.Module,
     raw_model: torch.nn.Module,
     loaders: OrderedDict[str, Any],
-    cfg: OmegaConf,
     *,
     device: torch.device,
     weight_dtype: torch.dtype,
@@ -106,19 +109,18 @@ def _run_classifier_eval(
 ) -> EvalReport:
     all_predictions: list[torch.Tensor] = []
     all_labels: list[torch.Tensor] = []
-    total = 0
     with torch.no_grad():
         for loader in loaders.values():
             seen = 0
             for batch in loader:
                 if num_samples_per_task is not None and seen >= num_samples_per_task:
                     break
+                batch = _limit_batch(batch, num_samples_per_task)
                 batch = utils.move_batch(batch, device, weight_dtype)
-                result = stage.eval_step(model, raw_model, batch, cfg)
+                result = stage.eval_step(model, raw_model, batch)
                 all_predictions.append(result["predictions"].cpu())
                 all_labels.append(result["labels"].cpu())
                 seen += result["predictions"].shape[0]
-                total += result["predictions"].shape[0]
     if not all_predictions:
         raise RuntimeError("Classifier eval produced no samples")
     report = stage.compute_binary_metrics(torch.cat(all_predictions), torch.cat(all_labels))
@@ -159,17 +161,18 @@ def _run_image_eval(
             for batch in loader:
                 if num_samples_per_task is not None and seen >= num_samples_per_task:
                     break
+                batch = _limit_batch(batch, num_samples_per_task)
                 batch = utils.move_batch(batch, device, weight_dtype)
                 lq = batch["lq"]
                 gt = batch["gt"]
-                lq_crop, _ = _crop_to_multiple(lq, crop_multiple)
-                gt_crop, _ = _crop_to_multiple(gt, crop_multiple)
+                lq_crop = _crop_to_multiple(lq, crop_multiple)
+                gt_crop = _crop_to_multiple(gt, crop_multiple)
                 eval_batch = {
                     **batch,
                     "lq": _pad_to_multiple(lq_crop, pad_multiple),
                     "gt": gt_crop,
                 }
-                result = stage.eval_step(model, raw_model, eval_batch, cfg)
+                result = stage.eval_step(model, raw_model, eval_batch)
                 prediction = result["pred"][:, :, : lq_crop.shape[2], : lq_crop.shape[3]]
                 batch_task_names = result["task_name"]
 
@@ -239,7 +242,6 @@ def run_eval(
             model,
             raw_model,
             loaders,
-            cfg,
             device=device,
             weight_dtype=weight_dtype,
             num_samples_per_task=num_samples_per_task,

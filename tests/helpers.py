@@ -12,7 +12,7 @@ from PIL import Image
 from torch import nn
 from transformers import CLIPTextConfig, CLIPTextModel, CLIPTokenizer
 
-from sd_aio.spade import DegAwareConditionModule, SpadeRestorer
+from sd_aio.spade import DegAwareConditionModule, SpadeConditionModule, SpadeRestorer
 
 
 def make_synthetic_task(
@@ -104,12 +104,12 @@ def make_tiny_restorer(condition_type: str = "simple") -> SpadeRestorer:
 
     condition = None
     deg_extractor = None
-    if condition_type in ("simple", "deg-aware"):
+    if condition_type == "simple":
+        condition = SpadeConditionModule("simple-conv", channel_dims=(32, 64, 128))
+        condition.setup(unet)
+    elif condition_type == "deg-aware":
         condition = DegAwareConditionModule(
-            backbone_type="simple-conv",
-            inner_dim=16,
-            text_dim=16,
-            channel_dims=(32, 64, 128),
+            "simple-conv", inner_dim=16, text_dim=16, channel_dims=(32, 64, 128)
         )
         condition.setup(unet)
     if condition_type == "deg-aware":

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+from types import ModuleType
 from typing import Any
 
 import torch
@@ -58,3 +60,15 @@ def count_parameters(module: nn.Module, trainable_only: bool = True) -> int:
 
 def weight_dtype_for(mixed_precision: str | None) -> torch.dtype:
     return {"fp16": torch.float16, "bf16": torch.bfloat16}.get(mixed_precision or "no", torch.float32)
+
+
+def load_stage(stage_name: str) -> ModuleType:
+    module_name = f"sd_aio.{stage_name}"
+    try:
+        return importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        if exc.name != module_name:
+            raise
+        raise ModuleNotFoundError(
+            f"Unknown stage {stage_name}; expected a module sd_aio/{stage_name}.py"
+        ) from exc

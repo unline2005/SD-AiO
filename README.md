@@ -83,7 +83,7 @@ counterpart used for attribute access only.
 | `set_train_mode(model)` | Train mode for trainable leaves only |
 | `set_eval_mode(model)` | Eval mode |
 | `compute_loss(model, raw_model, batch, cfg)` | One loss step, returns `(loss, logs)` |
-| `eval_step(model, raw_model, batch, cfg)` | One no-grad eval step |
+| `eval_step(model, raw_model, batch)` | One no-grad eval step |
 
 ## Evaluation and inference
 
@@ -109,13 +109,12 @@ Metrics are per-task means aggregated task-equally. VAE tiling is opt-in with
 ```text
 output_dir/
 ├── config.yaml                  # build snapshot: eval can never drift
-├── train.log / metrics.jsonl
+├── train.log
 ├── checkpoints/
 │   └── checkpoint-00001000/
 │       ├── weights.safetensors  # trainable parameters only
 │       ├── ema.safetensors      # optional
-│       ├── optimizer.pt
-│       └── state.json
+│       └── optimizer.pt
 └── final/weights.safetensors    # publication entry point
 ```
 
@@ -125,7 +124,7 @@ latest checkpoint is skipped automatically in favour of the previous one.
 ## Tests
 
 ```bash
-pytest          # 34 CPU regression tests, including a one-step end-to-end run
+pytest          # 40 CPU regression tests, including train/resume/eval end-to-end runs
 ruff check train.py eval.py sd_aio tests
 ```
 
