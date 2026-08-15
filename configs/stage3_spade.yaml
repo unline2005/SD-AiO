@@ -1,0 +1,44 @@
+stage: spade
+output_dir: ./output/stage3_spade
+
+model:
+  sd_path: /root/shared-nvme/model/sd2-1
+  condition_type: deg-aware        # none | simple | deg-aware
+  backbone_type: simple-conv       # simple-conv | resnet18 | convnext_tiny
+  cond_dim: 768
+  num_deg_types: 3
+  dino_path: /root/shared-nvme/model/dinov2
+  degradation_classifier_path: /root/shared-nvme/SD-AiO/output/stage1_classifier/final/weights.safetensors
+  pretrained_encoder_path: null    # optional stage2 final/weights.safetensors
+  adaln_layers: [down2, down3, mid]
+  timestep: 100
+  train_deg_embedding: true
+  lora:
+    unet_rank: 0
+    vae_encoder_rank: 16
+    vae_decoder_rank: 16
+    strategy: full
+
+data:
+  tasks_file: configs/tasks_3d.yaml
+  train_image_size: 512
+
+optimizer:
+  lr: 1e-4
+  weight_decay: 0.0
+
+loss:
+  lambda_l2: 2.0
+  lambda_lpips: 5.0
+  lpips_net: vgg
+  timestep:
+    strategy: fixed
+    value: 100
+
+trainer:
+  max_steps: 5000
+  train_batch_size: 3
+  gradient_accumulation_steps: 16
+  eval_freq: 500
+  eval_num_samples: 4
+  checkpointing_steps: 2000

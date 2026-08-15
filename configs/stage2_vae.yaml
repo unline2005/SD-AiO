@@ -1,0 +1,29 @@
+stage: vae_encoder
+output_dir: ./output/stage2_vae
+
+model:
+  sd_path: /root/shared-nvme/model/sd2-1
+  cond_dim: 768
+  adaln_layers: [down2, down3, mid]
+  dino_path: /root/shared-nvme/model/dinov2
+  num_deg_types: 3
+  degradation_classifier_path: /root/shared-nvme/SD-AiO/output/stage1_classifier/final/weights.safetensors
+  pretrained_encoder_path: null
+  train_deg_embedding: false
+
+data:
+  tasks_file: configs/tasks_3d.yaml
+  train_image_size: 512
+
+optimizer:
+  lr: 1e-4
+
+loss:
+  lambda_l1: 1.0
+
+trainer:
+  max_steps: 20000
+  train_batch_size: 8
+  eval_freq: 500
+  eval_num_samples: 4
+  checkpointing_steps: 2000

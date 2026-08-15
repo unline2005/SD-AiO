@@ -1,0 +1,48 @@
+# Shared defaults. Values here are the only implicit defaults in the codebase.
+seed: 42
+mixed_precision: bf16
+pin_memory: true
+persistent_workers: true
+keep_last_checkpoints: 3
+
+optimizer:
+  betas: [0.9, 0.999]
+  weight_decay: 0.01
+  eps: 1e-8
+
+scheduler:
+  name: cosine
+  warmup_steps: 500
+
+data:
+  num_workers: 8
+  augmentation:
+    hflip_prob: 0.25
+    vflip_prob: 0.25
+    rot90_prob: 0.0
+
+trainer:
+  log_every: 10
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  num_images_save_eval: 10
+  eval_num_samples: null
+  resume_from: null
+  resume_use_ema: false
+  log_with: null
+  round_robin: false
+
+eval:
+  batch_size: 1
+  crop_to_multiple: 16
+  pad_to_multiple: 64
+  overall: task_equal
+  num_samples_per_task: null
+  tiling: false
+  tile_size: 512
+  compute_lpips: true
+  lpips_net: vgg
+
+ema:
+  enabled: false
+  decay: 0.999
