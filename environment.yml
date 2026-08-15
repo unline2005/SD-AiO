@@ -1,0 +1,28 @@
+# Clean mamba environment for SD-AiO.
+# Verified on yhmi (RTX 5090, driver 580.159.03, CUDA 13.0).
+#
+# Create with:
+#   mamba env create -f environment.yml
+#   mamba activate sd-aio
+name: sd-aio
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu130
+      - torch==2.11.0+cu130
+      - torchvision==0.26.0+cu130
+      - accelerate>=1.0
+      - diffusers>=0.38.0,<0.39
+      - transformers>=4.35,<6
+      - peft>=0.10
+      - safetensors>=0.4
+      - omegaconf>=2.3
+      - numpy<3
+      - scikit-image>=0.22
+      - lpips>=0.1.4
+      - Pillow>=9.5
+      - PyYAML>=6
+      - tqdm>=4.65
