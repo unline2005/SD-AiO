@@ -15,9 +15,8 @@ FLOAT_DTYPES = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 def set_train_mode(module: nn.Module) -> None:
     """Put every *trainable* leaf module in train mode and keep frozen ones in eval mode.
 
-    This is the exact opposite of the old ``model.train()`` bug: frozen
-    GroupNorm/running-statistics modules never get switched back to batch
-    statistics during training.
+    Frozen children remain in eval mode. GroupNorm always uses input statistics;
+    train/eval distinctions matter for modules such as BatchNorm and Dropout.
     """
 
     def _set(module: nn.Module) -> None:

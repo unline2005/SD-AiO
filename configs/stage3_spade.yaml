@@ -1,44 +1,50 @@
-stage: spade
-output_dir: ./output/stage3_spade
+# ====================== 中文注释 ======================
+# 文件：stage3_spade.yaml
+# 作用：Stage 3 单步 SD 恢复模型配置。
+# 核心：SPADE 条件 + 可选 LoRA + 单步恢复。
+# ============================================================
 
-model:
-  sd_path: /root/shared-nvme/model/sd2-1
+stage: spade  # 中文：当前 Stage 名称
+output_dir: ./output/stage3_spade  # 中文：输出目录
+
+model:  # 中文：模型配置
+  sd_path: /root/shared-nvme/model/sd2-1  # 中文：SD 2.1 模型路径
   condition_type: deg-aware        # none | simple | deg-aware
   backbone_type: simple-conv       # simple-conv | resnet18 | convnext_tiny
-  cond_dim: 768
-  num_deg_types: 3
-  dino_path: /root/shared-nvme/model/dinov2
-  degradation_classifier_path: /root/shared-nvme/SD-AiO/output/stage1_classifier/final/weights.safetensors
+  cond_dim: 768  # 中文：条件特征维度
+  num_deg_types: 3  # 中文：退化类别数量
+  dino_path: /root/shared-nvme/model/dinov2  # 中文：DINOv2 模型路径
+  degradation_classifier_path: /root/shared-nvme/SD-AiO/output/stage1_classifier/final/weights.safetensors  # 中文：退化分类器权重路径
   pretrained_encoder_path: null    # optional stage2 final/weights.safetensors
-  adaln_layers: [down2, down3, mid]
-  timestep: 100
-  train_deg_embedding: true
-  lora:
-    unet_rank: 0
-    vae_encoder_rank: 16
-    vae_decoder_rank: 16
-    strategy: full
+  adaln_layers: [down2, down3, mid]  # 中文：插入 AdaIN 的层
+  timestep: 100  # 中文：单步恢复使用的时间步
+  train_deg_embedding: true  # 中文：是否训练退化 embedding
+  lora:  # 中文：LoRA 配置
+    unet_rank: 0  # 中文：UNet LoRA rank
+    vae_encoder_rank: 16  # 中文：VAE encoder LoRA rank
+    vae_decoder_rank: 16  # 中文：VAE decoder LoRA rank
+    strategy: full  # 中文：LoRA 注入策略
 
-data:
-  tasks_file: configs/tasks_3d.yaml
-  train_image_size: 512
+data:  # 中文：数据配置
+  tasks_file: configs/tasks_3d.yaml  # 中文：共享数据集定义文件
+  train_image_size: 512  # 中文：训练图像尺寸
 
-optimizer:
-  lr: 1e-4
-  weight_decay: 0.0
+optimizer:  # 中文：优化器配置
+  lr: 1e-4  # 中文：配置项
+  weight_decay: 0.0  # 中文：权重衰减
 
-loss:
-  lambda_l2: 2.0
-  lambda_lpips: 5.0
-  lpips_net: vgg
-  timestep:
-    strategy: fixed
-    value: 100
+loss:  # 中文：损失配置
+  lambda_l2: 2.0  # 中文：L2 损失权重
+  lambda_lpips: 5.0  # 中文：LPIPS 损失权重
+  lpips_net: vgg  # 中文：LPIPS 使用的骨干网络
+  timestep:  # 中文：单步恢复使用的时间步
+    strategy: fixed  # 中文：LoRA 注入策略
+    value: 100  # 中文：配置项
 
-trainer:
-  max_steps: 5000
-  train_batch_size: 3
-  gradient_accumulation_steps: 16
-  eval_freq: 500
-  eval_num_samples: 4
-  checkpointing_steps: 2000
+trainer:  # 中文：训练器配置
+  max_steps: 5000  # 中文：最大训练步数
+  train_batch_size: 3  # 中文：训练批大小
+  gradient_accumulation_steps: 16  # 中文：梯度累积步数
+  eval_freq: 500  # 中文：每隔多少步评估一次
+  eval_num_samples: 4  # 中文：每个任务评估样本数
+  checkpointing_steps: 2000  # 中文：每隔多少步保存 checkpoint

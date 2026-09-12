@@ -1,0 +1,122 @@
+train:
+- name: train_FoundIR_512patch_08Haze
+  deg_type:
+  - haze
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/08Haze/lq
+- name: train_FoundIR_512patch_09Lowlight_Haze
+  deg_type:
+  - haze
+  - lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/09Lowlight_Haze/lq
+- name: train_FoundIR_512patch_10Rain
+  deg_type:
+  - rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/10Rain/lq
+- name: train_FoundIR_512patch_13Rain_Haze
+  deg_type:
+  - haze
+  - rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/13Rain_Haze/lq
+- name: train_FoundIR_512patch_14Lowlight
+  deg_type:
+  - lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/14Lowlight/lq
+- name: train_GGT-100k_Haze
+  deg_type:
+  - haze
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/train/Haze/lq
+- name: train_GGT-100k_Rain
+  deg_type:
+  - rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/train/Rain/lq
+  exclude_filenames:
+  - 04332.png
+  - 06415.png
+- name: train_GGT-100k_Snow
+  deg_type:
+  - snow
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/train/Snow/lq
+  exclude_filenames:
+  - 01250.png
+- name: train_GGT-100k_Low-Light
+  deg_type:
+  - lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/train/Low-Light/lq
+test:
+- name: test_FoundIR_512patch_08Haze
+  deg_type:
+  - haze
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/08Haze/lq
+- name: test_FoundIR_512patch_09Lowlight_Haze
+  deg_type:
+  - haze
+  - lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/09Lowlight_Haze/lq
+- name: test_FoundIR_512patch_10Rain
+  deg_type:
+  - rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/10Rain/lq
+- name: test_FoundIR_512patch_13Rain_Haze
+  deg_type:
+  - haze
+  - rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/13Rain_Haze/lq
+- name: test_FoundIR_512patch_14Lowlight
+  deg_type:
+  - lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/14Lowlight/lq
+- name: test_GGT-100k_Haze
+  deg_type:
+  - haze
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/test/Haze/lq
+- name: test_GGT-100k_Rain
+  deg_type:
+  - rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/test/Rain/lq
+- name: test_GGT-100k_Snow
+  deg_type:
+  - snow
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/test/Snow/lq
+- name: test_GGT-100k_Low-Light
+  deg_type:
+  - lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/test/Low-Light/lq
+val:
+- name: val_FoundIR_512patch_08Haze
+  deg_type:
+  - haze
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/08Haze/lq
+- name: val_FoundIR_512patch_09Lowlight_Haze
+  deg_type:
+  - haze
+  - lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/09Lowlight_Haze/lq
+- name: val_FoundIR_512patch_10Rain
+  deg_type:
+  - rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/10Rain/lq
+- name: val_FoundIR_512patch_13Rain_Haze
+  deg_type:
+  - haze
+  - rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/13Rain_Haze/lq
+- name: val_FoundIR_512patch_14Lowlight
+  deg_type:
+  - lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/14Lowlight/lq
+- name: val_GGT-100k_Haze
+  deg_type:
+  - haze
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/GGT-100k/Haze/lq
+- name: val_GGT-100k_Rain
+  deg_type:
+  - rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/GGT-100k/Rain/lq
+- name: val_GGT-100k_Snow
+  deg_type:
+  - snow
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/GGT-100k/Snow/lq
+- name: val_GGT-100k_Low-Light
+  deg_type:
+  - lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/GGT-100k/Low-Light/lq

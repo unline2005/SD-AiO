@@ -1,9 +1,11 @@
-"""Checkpoint helpers: safetensors weights + torch optimizer state + EMA."""
+"""Trainable weights, resumable checkpoints and exponential moving averages."""
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
+import tempfile
 import warnings
 from pathlib import Path
 
@@ -15,60 +17,115 @@ WEIGHTS_NAME = "weights.safetensors"
 EMA_NAME = "ema.safetensors"
 OPTIMIZER_NAME = "optimizer.pt"
 CHECKPOINT_PREFIX = "checkpoint-"
+COMPLETE_NAME = "complete.json"
+WRITING_NAME = ".incomplete"
 
 
 def save_model_weights(model: nn.Module, path: str | Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     state = {
-        name: parameter.detach().cpu()
+        name: parameter.detach().cpu().contiguous()
         for name, parameter in model.named_parameters()
         if parameter.requires_grad
     }
     if not state:
         raise RuntimeError("Refusing to save a model without trainable parameters")
-    save_file(state, path)
+    if hasattr(model, "save_auxiliary"):
+        model.save_auxiliary(path)
+    temporary = path.with_suffix(".tmp")
+    save_file(state, temporary)
+    temporary.replace(path)
     return path
 
 
 def load_model_weights(model: nn.Module, path: str | Path) -> None:
-    """Load trainable-only weights.
-
-    Unexpected keys and missing *trainable* keys are fatal.  Missing frozen
-    keys are expected because frozen SD/DINO weights are never stored.
-    """
+    """Validate every supplied tensor before loading; absent frozen state is expected."""
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {path}")
     state = load_file(str(path), device="cpu")
     if not state:
         raise RuntimeError(f"Checkpoint {path} is empty")
-    missing, unexpected = model.load_state_dict(state, strict=False)
+    expected = model.state_dict()
+    unexpected = set(state) - set(expected)
     if unexpected:
         raise RuntimeError(
             f"Checkpoint {path} has {len(unexpected)} unexpected keys; "
-            f"config/checkpoint mismatch. First: {unexpected[:5]}"
+            f"config/checkpoint mismatch. First: {sorted(unexpected)[:5]}"
         )
     trainable = {name for name, parameter in model.named_parameters() if parameter.requires_grad}
-    missing_trainable = trainable & set(missing)
-    if missing_trainable:
+    missing = trainable - set(state)
+    if missing:
         raise RuntimeError(
-            f"Checkpoint {path} is missing {len(missing_trainable)} trainable keys; "
-            f"first: {sorted(missing_trainable)[:5]}"
+            f"Checkpoint {path} is missing {len(missing)} trainable keys; first: {sorted(missing)[:5]}"
         )
+    for name, tensor in state.items():
+        if tensor.shape != expected[name].shape:
+            raise RuntimeError(
+                f"Checkpoint {path}: shape mismatch for {name}: "
+                f"{tuple(tensor.shape)} != {tuple(expected[name].shape)}"
+            )
+    # Only absent frozen keys are permitted; trainable keys and shapes were checked above.
+    model.load_state_dict(state, strict=False)
+    if hasattr(model, "load_auxiliary"):
+        auxiliary_source = path
+        # Legacy EMA files shared the ordinary weights' frozen condition sidecar.
+        if (
+            path.name == EMA_NAME
+            and not path.with_name("ema.condition.safetensors").exists()
+            and path.with_name("weights.condition.safetensors").is_file()
+        ):
+            auxiliary_source = path.with_name(WEIGHTS_NAME)
+        model.load_auxiliary(auxiliary_source)
 
 
 def _step_from_dir(path: Path) -> int:
-    match = re.search(r"checkpoint-(\d+)$", path.name)
+    match = re.fullmatch(r"checkpoint-(\d+)", path.name)
     return int(match.group(1)) if match else -1
 
 
+def is_checkpoint_complete(path: str | Path) -> bool:
+    """Accept legacy complete directories; new checkpoints must match their manifest."""
+    path = Path(path)
+    try:
+        if not path.is_dir() or path.is_symlink() or _step_from_dir(path) < 0:
+            return False
+        if (path / WRITING_NAME).exists() or any(path.glob("*.tmp")):
+            return False
+        required = {WEIGHTS_NAME, OPTIMIZER_NAME}
+        if any(not (path / name).is_file() or (path / name).stat().st_size == 0 for name in required):
+            return False
+        manifest = path / COMPLETE_NAME
+        if not manifest.exists():
+            return True
+        content = json.loads(manifest.read_text())
+        files = content["files"]
+        if content["version"] != 1 or content["step"] != _step_from_dir(path):
+            return False
+        if not isinstance(files, dict) or not required.issubset(files):
+            return False
+        return all(
+            Path(name).name == name
+            and isinstance(size, int)
+            and size > 0
+            and (path / name).is_file()
+            and (path / name).stat().st_size == size
+            for name, size in files.items()
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def iter_checkpoints(output_dir: str | Path) -> list[Path]:
-    checkpoint_dir = Path(output_dir) / "checkpoints"
-    if not checkpoint_dir.is_dir():
+    directory = Path(output_dir) / "checkpoints"
+    if not directory.is_dir():
         return []
-    candidates = [p for p in checkpoint_dir.iterdir() if p.is_dir() and p.name.startswith(CHECKPOINT_PREFIX)]
-    return sorted(candidates, key=_step_from_dir, reverse=True)
+    return sorted(
+        (path for path in directory.iterdir() if is_checkpoint_complete(path)),
+        key=_step_from_dir,
+        reverse=True,
+    )
 
 
 def find_latest_checkpoint(output_dir: str | Path) -> Path | None:
@@ -77,41 +134,47 @@ def find_latest_checkpoint(output_dir: str | Path) -> Path | None:
 
 
 def resolve_weights_path(path_or_dir: str | Path, prefer_ema: bool = False) -> Path:
-    """Resolve a user path to a concrete ``weights.safetensors``/``ema.safetensors`` file."""
+    """Resolve a weight file, checkpoint directory, final directory or experiment root."""
     path = Path(path_or_dir)
     if path.is_file():
         if path.suffix != ".safetensors":
             raise ValueError(f"Expected a .safetensors file, got {path}")
         if prefer_ema and path.name == WEIGHTS_NAME:
             raise ValueError("--use_ema was set but an explicit weights.safetensors file was provided")
+        parent = path.parent
+        if parent.name.startswith(CHECKPOINT_PREFIX) and (
+            (parent / WRITING_NAME).exists()
+            or ((parent / COMPLETE_NAME).exists() and not is_checkpoint_complete(parent))
+        ):
+            raise RuntimeError(f"Checkpoint is incomplete: {parent}")
         return path
-
     if not path.is_dir():
         raise FileNotFoundError(f"Checkpoint path does not exist: {path}")
-
+    name = EMA_NAME if prefer_ema else WEIGHTS_NAME
     if path.name.startswith(CHECKPOINT_PREFIX):
-        checkpoint_dir = path
+        if (path / WRITING_NAME).exists() or (
+            (path / COMPLETE_NAME).exists() and not is_checkpoint_complete(path)
+        ):
+            raise RuntimeError(f"Checkpoint is incomplete: {path}")
+        directory = path
+    elif (path / name).is_file():
+        directory = path
     else:
-        checkpoints = iter_checkpoints(path)
-        if checkpoints:
-            checkpoint_dir = checkpoints[0]
-        else:
-            final_weights = path / "final" / (EMA_NAME if prefer_ema else WEIGHTS_NAME)
-            if final_weights.exists():
-                return final_weights
-            if prefer_ema:
-                raise FileNotFoundError(f"--use_ema was set but {final_weights} does not exist")
-            raise FileNotFoundError(f"No checkpoints or final weights found under {path}")
-
-    if prefer_ema:
-        ema_weights = checkpoint_dir / EMA_NAME
-        if not ema_weights.exists():
-            raise FileNotFoundError(f"--use_ema was set but {ema_weights} does not exist")
-        return ema_weights
-    weights = checkpoint_dir / WEIGHTS_NAME
-    if not weights.exists():
-        raise FileNotFoundError(f"No {weights.name} in {checkpoint_dir}")
+        latest = find_latest_checkpoint(path)
+        directory = latest if latest is not None else path / "final"
+    weights = directory / name
+    if not weights.is_file():
+        prefix = "--use_ema was set but " if prefer_ema else ""
+        raise FileNotFoundError(f"{prefix}{weights} does not exist")
     return weights
+
+
+def _save_ema_weights(model: nn.Module, ema: ModelEMA, path: Path) -> None:
+    if hasattr(model, "save_auxiliary"):
+        model.save_auxiliary(path)
+    temporary = path.with_suffix(".tmp")
+    save_file(ema.state_dict(), temporary)
+    temporary.replace(path)
 
 
 def save_checkpoint(
@@ -126,26 +189,50 @@ def save_checkpoint(
     keep_last = int(keep_last)
     if keep_last < 1:
         raise ValueError("keep_last must be >= 1")
-    checkpoint_dir = Path(output_dir) / "checkpoints" / f"checkpoint-{int(step):08d}"
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-
-    save_model_weights(model, checkpoint_dir / WEIGHTS_NAME)
-    if ema is not None:
-        save_file(ema.state_dict(), checkpoint_dir / EMA_NAME)
-    else:
-        (checkpoint_dir / EMA_NAME).unlink(missing_ok=True)
-    torch.save(
-        {
-            "optimizer": optimizer.state_dict(),
-            "scheduler": scheduler.state_dict() if scheduler is not None else None,
-            "step": int(step),
-        },
-        checkpoint_dir / OPTIMIZER_NAME,
-    )
-
+    step = int(step)
+    if step < 0:
+        raise ValueError("checkpoint step must be non-negative")
+    directory = Path(output_dir) / "checkpoints" / f"checkpoint-{step:08d}"
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    # Unfinished staging directories are invisible to discovery and retention.
+    with tempfile.TemporaryDirectory(prefix=f".{directory.name}-", dir=directory.parent) as temporary:
+        staged = Path(temporary)
+        save_model_weights(model, staged / WEIGHTS_NAME)
+        if ema is not None:
+            _save_ema_weights(model, ema, staged / EMA_NAME)
+        torch.save(
+            {
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict() if scheduler is not None else None,
+                "step": step,
+            },
+            staged / OPTIMIZER_NAME,
+        )
+        files = {path.name: path.stat().st_size for path in staged.iterdir() if path.is_file()}
+        (staged / COMPLETE_NAME).write_text(
+            json.dumps({"version": 1, "step": step, "files": files}, indent=2)
+        )
+        _publish_checkpoint(staged, directory)
     for stale in iter_checkpoints(output_dir)[keep_last:]:
-        shutil.rmtree(stale, ignore_errors=True)
-    return checkpoint_dir
+        shutil.rmtree(stale)
+    return directory
+
+
+def _publish_checkpoint(staged: Path, directory: Path) -> None:
+    if not directory.exists():
+        staged.replace(directory)
+        return
+    if not is_checkpoint_complete(directory):
+        raise RuntimeError(f"Refusing to overwrite an incomplete or active checkpoint: {directory}")
+    # A repeated save of the same step keeps the old complete directory until publication.
+    backup = Path(tempfile.mkdtemp(prefix=f".{directory.name}-old-", dir=directory.parent))
+    directory.replace(backup)
+    try:
+        staged.replace(directory)
+    except BaseException:
+        backup.replace(directory)
+        raise
+    shutil.rmtree(backup)
 
 
 def _checkpoint_dirs(path: str | Path) -> list[Path]:
@@ -155,9 +242,7 @@ def _checkpoint_dirs(path: str | Path) -> list[Path]:
             "resume_from must be an output_dir or checkpoint-* directory; "
             "a weights-only file cannot restore optimizer state"
         )
-    if path.name.startswith(CHECKPOINT_PREFIX):
-        return [path]
-    return iter_checkpoints(path)
+    return [path] if path.name.startswith(CHECKPOINT_PREFIX) else iter_checkpoints(path)
 
 
 def restore_training(
@@ -170,42 +255,48 @@ def restore_training(
     candidates = _checkpoint_dirs(path)
     if not candidates:
         raise FileNotFoundError(f"No checkpoint found under {path}")
-
     last_error: Exception | None = None
-    for checkpoint_dir in candidates:
-        weights = checkpoint_dir / WEIGHTS_NAME
-        optimizer_file = checkpoint_dir / OPTIMIZER_NAME
+    for directory in candidates:
+        weights = directory / WEIGHTS_NAME
+        optimizer_file = directory / OPTIMIZER_NAME
         try:
             if not weights.is_file():
                 raise FileNotFoundError(f"{weights} does not exist")
             if not optimizer_file.is_file():
                 raise FileNotFoundError(f"{optimizer_file} does not exist")
-            load_model_weights(model, weights)
-
+            if not is_checkpoint_complete(directory):
+                raise RuntimeError(f"Checkpoint is incomplete: {directory}")
             state = torch.load(optimizer_file, map_location="cpu", weights_only=True)
+            step = int(state["step"])
+            if step != _step_from_dir(directory):
+                raise ValueError(
+                    f"Optimizer step {step} disagrees with checkpoint directory {directory.name}"
+                )
+            if scheduler is not None and state["scheduler"] is None:
+                raise ValueError(f"Checkpoint {directory} has no scheduler state")
+            load_model_weights(model, weights)
             optimizer.load_state_dict(state["optimizer"])
             if scheduler is not None:
                 scheduler.load_state_dict(state["scheduler"])
-            return int(state["step"]), checkpoint_dir
+            return step, directory
         except Exception as exc:
             last_error = exc
             warnings.warn(
-                f"Checkpoint {checkpoint_dir} failed to load ({exc}); trying previous checkpoint",
+                f"Checkpoint {directory} failed to load ({exc}); trying previous checkpoint",
                 stacklevel=2,
             )
-
     raise RuntimeError(f"All checkpoints failed to load: {last_error}")
 
 
 def save_final(model: nn.Module, output_dir: str | Path, ema: ModelEMA | None = None) -> Path:
-    final_dir = Path(output_dir) / "final"
-    final_dir.mkdir(parents=True, exist_ok=True)
-    save_model_weights(model, final_dir / WEIGHTS_NAME)
+    directory = Path(output_dir) / "final"
+    directory.mkdir(parents=True, exist_ok=True)
+    save_model_weights(model, directory / WEIGHTS_NAME)
     if ema is not None:
-        save_file(ema.state_dict(), final_dir / EMA_NAME)
+        _save_ema_weights(model, ema, directory / EMA_NAME)
     else:
-        (final_dir / EMA_NAME).unlink(missing_ok=True)
-    return final_dir
+        (directory / EMA_NAME).unlink(missing_ok=True)
+    return directory
 
 
 class ModelEMA:
@@ -240,4 +331,5 @@ class ModelEMA:
                     f"EMA parameter {name} shape mismatch: "
                     f"{tuple(tensor.shape)} != {tuple(self.shadow[name].shape)}"
                 )
+        for name, tensor in state.items():
             self.shadow[name].copy_(tensor.to(self.shadow[name].device))

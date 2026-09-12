@@ -1,27 +1,55 @@
-# Shared defaults. Values here are the only implicit defaults in the codebase.
 seed: 42
 mixed_precision: bf16
 pin_memory: true
 persistent_workers: true
 keep_last_checkpoints: 3
-
 optimizer:
-  betas: [0.9, 0.999]
+  betas:
+  - 0.9
+  - 0.999
   weight_decay: 0.01
-  eps: 1e-8
-
+  eps: 1.0e-08
+  name: adamw
+  momentum: 0.9
 scheduler:
   name: cosine
   warmup_steps: 500
-
 data:
+  val: []
+  prefetch_factor: 2
+  deg_types: null
+  classification_sampling: uniform
+  paired_sampling: uniform
   num_workers: 8
   augmentation:
     hflip_prob: 0.25
     vflip_prob: 0.25
     rot90_prob: 0.0
-
+  preprocessing:
+    paired_train:
+      mode: random_crop
+      interpolation: bicubic
+      exif_transpose: false
+    paired_eval:
+      mode: native
+      interpolation: bicubic
+      exif_transpose: false
+    classifier_train:
+      mode: random_crop
+      interpolation: bilinear
+      exif_transpose: true
+    classifier_eval:
+      mode: center_crop
+      interpolation: bilinear
+      exif_transpose: true
+    inference:
+      mode: native
+      image_size: 512
+      interpolation: bicubic
+      exif_transpose: false
 trainer:
+  distributed_timeout_seconds: 600
+  eval_split: test
   log_every: 10
   gradient_accumulation_steps: 1
   max_grad_norm: 1.0
@@ -30,18 +58,51 @@ trainer:
   resume_from: null
   log_with: null
   round_robin: false
-
 eval:
+  noise_seed: 42
   batch_size: 1
   crop_to_multiple: 16
   pad_to_multiple: 64
   overall: task_equal
   num_samples_per_task: null
+  patchwise: false
+  tile_overlap: 128
   tiling: false
   tile_size: 512
   compute_lpips: true
   lpips_net: vgg
-
 ema:
   enabled: false
   decay: 0.999
+model:
+  spade_version: 2
+  condition_mode: legacy
+  vae_training:
+    encoder_init: pretrained
+    freeze_encoder: true
+    target: latent
+  classifier:
+    head_type: mlp
+    query_heads: 4
+    train_last_blocks: null
+    head_warmup_steps: 0
+    l2sp_weight: 0.0
+    pad_to_patch_multiple: false
+    patch:
+      target: none
+      layers: [3, 6, 9, 12]
+      hidden_dim: 128
+  backend: sd_unet
+loss:
+  pixel_type: mse
+  lambda_lpips: 0.0
+  lpips_net: vgg
+  classification: focal
+  patch:
+    weight: 0.0
+    mask_threshold: 0.05
+  asl:
+    gamma_pos: 0.0
+    gamma_neg: 4.0
+    clip: 0.05
+  charbonnier_epsilon: 0.001

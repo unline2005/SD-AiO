@@ -1,0 +1,67 @@
+_base_: stage1_classifier_foundir_ggt_cdd11.yaml
+
+model:
+  num_deg_types: 6
+  classifier:
+    head_type: mlp
+    train_last_blocks: null
+    head_warmup_steps: 0
+    l2sp_weight: 0.0
+    pad_to_patch_multiple: true
+    patch:
+      target: none
+      layers: [3, 6, 9, 12]
+      hidden_dim: 128
+
+data:
+  tasks_file: configs/tasks_classifier_foundir_ggt_cdd11_6d.yaml
+  deg_types: [blur, noise, haze, rain, snow, lowlight]
+  classification_sampling: task_balanced
+  image_size: 512
+  num_workers: 8
+  prefetch_factor: 2
+  augmentation:
+    hflip_prob: 0.5
+
+optimizer:
+  backbone_lr: 5.0e-6
+  head_lr: 1.0e-4
+
+loss:
+  classification: bce
+  patch:
+    weight: 0.0
+    mask_threshold: 0.05
+
+trainer:
+  resume_from: null
+  num_processes: 2
+  gpu_ids: [0, 1]
+  cpu_threads_per_process: 4
+  max_steps: 10000
+  train_batch_size: 16
+  gradient_accumulation_steps: 1
+  eval_freq: 500
+  eval_num_samples: 256
+  checkpointing_steps: 500
+  early_stopping:
+    enabled: true
+    metric: f1
+    mode: max
+    min_delta: 0.001
+    patience: 8
+    min_steps: 5000
+
+eval:
+  batch_size: 16
+  tsne:
+    enabled: true
+    every_steps: 2000
+    samples_per_task: 50
+    perplexity: 30
+    seed: 42
+    iterations: 1500
+    plot_python: /data/yhmi/miniforge3/envs/restoration-cu128/bin/python
+    plot_script: /home/yhmi/SD-AiO/tools/plot_classifier_tsne.py
+
+keep_last_checkpoints: 3

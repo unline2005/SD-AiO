@@ -17,11 +17,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from omegaconf import OmegaConf
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from tqdm.auto import tqdm
 
 from sd_aio import metrics, utils
-from sd_aio.data import IMAGE_EXTENSIONS
+from sd_aio.data import IMAGE_EXTENSIONS, PairedTransform, preprocessing_options
 
 
 @dataclass
@@ -80,6 +80,7 @@ def _save_strip(
     lq: torch.Tensor,
     prediction: torch.Tensor,
     gt: torch.Tensor,
+    extra_panels: dict[str, torch.Tensor] | None = None,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     strip = np.concatenate(
@@ -92,39 +93,73 @@ def _save_strip(
     )
     strip = (np.clip(strip, 0.0, 1.0) * 255.0).astype(np.uint8)
     path = output_dir / f"step_{int(step):08d}_{task_name}_{index:03d}.png"
-    Image.fromarray(strip).save(path)
+    if extra_panels is None:
+        Image.fromarray(strip).save(path)
+    else:
+        panels = [
+            ("LQ", lq),
+            ("Original VAE (LQ)", extra_panels["baseline"]),
+            ("Pre-restored", prediction),
+            ("Original VAE (GT)", extra_panels["vae_gt"]),
+            ("GT", gt),
+        ]
+        height, width = gt.shape[-2:]
+        header = max(28, width // 24)
+        font = ImageFont.truetype("DejaVuSans.ttf", size=max(10, width // 32))
+        canvas = Image.new("RGB", (width * len(panels), height + header), "white")
+        draw = ImageDraw.Draw(canvas)
+        for column, (label, tensor) in enumerate(panels):
+            array = (np.clip(metrics.to_numpy_rgb(tensor), 0, 1) * 255).astype(np.uint8)
+            canvas.paste(Image.fromarray(array), (column * width, header))
+            draw.text((column * width + 8, 7), label, fill="black", font=font)
+        canvas.save(path)
     return path
 
 
 def _run_classifier_eval(
     stage: Any,
-    model: torch.nn.Module,
     raw_model: torch.nn.Module,
     loaders: OrderedDict[str, Any],
+    cfg: OmegaConf,
     *,
     device: torch.device,
     weight_dtype: torch.dtype,
     num_samples_per_task: int | None,
     step: int = 0,
 ) -> EvalReport:
+    class_names = [str(name) for name in cfg.data.deg_types]
     all_predictions: list[torch.Tensor] = []
     all_labels: list[torch.Tensor] = []
     with torch.no_grad():
         for loader in loaders.values():
             seen = 0
             for batch in loader:
-                if num_samples_per_task is not None and seen >= num_samples_per_task:
+                remaining = None if num_samples_per_task is None else num_samples_per_task - seen
+                if remaining is not None and remaining <= 0:
                     break
-                batch = _limit_batch(batch, num_samples_per_task)
+                batch = _limit_batch(batch, remaining)
                 batch = utils.move_batch(batch, device, weight_dtype)
-                result = stage.eval_step(model, raw_model, batch)
+                # Only rank 0 evaluates: bypass DDP forward and its buffer broadcasts.
+                result = stage.eval_step(raw_model, raw_model, batch)
                 all_predictions.append(result["predictions"].cpu())
                 all_labels.append(result["labels"].cpu())
                 seen += result["predictions"].shape[0]
     if not all_predictions:
         raise RuntimeError("Classifier eval produced no samples")
-    report = stage.compute_binary_metrics(torch.cat(all_predictions), torch.cat(all_labels))
+    predictions = torch.cat(all_predictions)
+    labels = torch.cat(all_labels)
+    if predictions.shape != labels.shape or labels.ndim != 2 or labels.shape[1] != len(class_names):
+        raise ValueError(
+            f"Classifier predictions/labels {predictions.shape}/{labels.shape} "
+            f"do not match data.deg_types={class_names}"
+        )
+    report = stage.compute_binary_metrics(predictions, labels)
     summary = {key: value for key, value in report.items() if key != "per_class"}
+    report["class_names"] = class_names
+    report["num_samples"] = labels.shape[0]
+    report["per_class"] = [
+        {"name": name, **values} for name, values in zip(class_names, report["per_class"], strict=True)
+    ]
     return EvalReport(
         step=step,
         task_metrics={"classification": summary},
@@ -161,7 +196,9 @@ def _run_image_eval(
             for batch in loader:
                 if num_samples_per_task is not None and seen >= num_samples_per_task:
                     break
-                batch = _limit_batch(batch, num_samples_per_task)
+                batch = _limit_batch(
+                    batch, None if num_samples_per_task is None else num_samples_per_task - seen
+                )
                 batch = utils.move_batch(batch, device, weight_dtype)
                 lq = batch["lq"]
                 gt = batch["gt"]
@@ -172,7 +209,7 @@ def _run_image_eval(
                     "lq": _pad_to_multiple(lq_crop, pad_multiple),
                     "gt": gt_crop,
                 }
-                result = stage.eval_step(model, raw_model, eval_batch)
+                result = stage.eval_step(raw_model, raw_model, eval_batch)
                 prediction = result["pred"][:, :, : lq_crop.shape[2], : lq_crop.shape[3]]
                 batch_task_names = result["task_name"]
 
@@ -187,11 +224,7 @@ def _run_image_eval(
                         )
                     accumulator.add(str(batch_task_names[index]), values)
 
-                    if (
-                        save_images
-                        and output_dir is not None
-                        and len(vis_paths) < len(loaders) * images_per_task
-                    ):
+                    if save_images and output_dir is not None and seen + index < images_per_task:
                         vis_paths.append(
                             _save_strip(
                                 output_dir / "eval",
@@ -201,6 +234,12 @@ def _run_image_eval(
                                 lq_crop[index],
                                 pred,
                                 target,
+                                extra_panels={
+                                    key: result[key][index, :, : pred.shape[-2], : pred.shape[-1]]
+                                    for key in ("baseline", "vae_gt")
+                                }
+                                if "baseline" in result
+                                else None,
                             )
                         )
                 seen += prediction.shape[0]
@@ -239,9 +278,9 @@ def run_eval(
     if str(cfg.stage) == "classifier":
         return _run_classifier_eval(
             stage,
-            model,
             raw_model,
             loaders,
+            cfg,
             device=device,
             weight_dtype=weight_dtype,
             num_samples_per_task=num_samples_per_task,
@@ -278,6 +317,64 @@ def list_input_images(input_path: str | Path) -> list[Path]:
     raise FileNotFoundError(f"Input path not found: {path}")
 
 
+def predict_tiles(model, tensor, text_embedding, image_id, tile_size, overlap):
+    if tile_size <= 0 or not 0 <= overlap < tile_size:
+        raise ValueError("Require tile_size > 0 and 0 <= tile_overlap < tile_size")
+    height, width = tensor.shape[-2:]
+    if height <= tile_size and width <= tile_size:
+        return model(tensor, text_embedding, noise_seeds=model.noise_seeds([image_id])).clamp(-1, 1)
+
+    def starts(length):
+        end = max(0, length - tile_size)
+        return sorted(set([*range(0, end + 1, tile_size - overlap), end]))
+
+    result = torch.zeros(tensor.shape, dtype=torch.float32, device="cpu")
+    total = torch.zeros((1, 1, height, width), dtype=torch.float32)
+    for top in starts(height):
+        for left in starts(width):
+            tile = tensor[..., top : top + tile_size, left : left + tile_size]
+            seeds = model.noise_seeds([f"{image_id}:tile:{top}:{left}"])
+            prediction = model(tile, text_embedding, noise_seeds=seeds).clamp(-1, 1).float().cpu()
+            h, w = tile.shape[-2:]
+            wy = torch.hann_window(h, periodic=False).clamp_min(1e-3)
+            wx = torch.hann_window(w, periodic=False).clamp_min(1e-3)
+            weight = wy[:, None] * wx[None, :]
+            result[..., top : top + h, left : left + w] += prediction * weight
+            total[..., top : top + h, left : left + w] += weight
+    return result / total
+
+
+def _inference_files(
+    input_path: str | Path, gt_dir: str | Path | None
+) -> tuple[list[tuple[Path, Path]], dict[str, Path]]:
+    """Resolve all output names and GT matches before encoding or writing."""
+    input_root = Path(input_path)
+    files = []
+    outputs = {}
+    for image_path in list_input_images(input_path):
+        relative = image_path.relative_to(input_root) if input_root.is_dir() else Path(image_path.name)
+        output = relative.with_suffix(".png")
+        if output in outputs:
+            raise ValueError(f"Output path collision {output}: {outputs[output]} and {image_path}")
+        outputs[output] = image_path
+        files.append((image_path, output))
+    gt_files = {}
+    if gt_dir is not None:
+        root = Path(gt_dir)
+        if not root.is_dir():
+            raise FileNotFoundError(f"GT directory not found: {root}")
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            if path.stem in gt_files:
+                raise ValueError(f"Ambiguous GT stem {path.stem!r}: {gt_files[path.stem]} and {path}")
+            gt_files[path.stem] = path
+        missing = [path for path, _ in files if path.stem not in gt_files]
+        if missing:
+            raise FileNotFoundError(f"No GT image matching stem {missing[0].stem} in {root}")
+    return files, gt_files
+
+
 def run_inference(
     stage: Any,
     model: torch.nn.Module,
@@ -291,9 +388,16 @@ def run_inference(
     prompt: str | None = None,
     gt_dir: str | Path | None = None,
 ) -> tuple[list[Path], EvalReport | None]:
-    """Pad -> shared forward -> crop back -> save.  Optionally score against a GT directory."""
+    """Native input -> pad -> forward -> crop padding -> save.
+
+    data.preprocessing.inference optionally transforms LQ/GT together before
+    padding. Unlike dataset benchmarks, inference does not crop to a multiple.
+    """
     if str(cfg.stage) != "spade":
         raise ValueError(f"run_inference is only available for stage=spade, got {cfg.stage}")
+    files, gt_files = _inference_files(input_path, gt_dir)
+    options = {"image_size": 0, **preprocessing_options(cfg, "inference", {})}
+    preprocessing = PairedTransform(is_train=False, **options)
     if weight_dtype is None:
         weight_dtype = utils.weight_dtype_for(str(cfg.mixed_precision))
     stage.set_eval_mode(raw_model)
@@ -315,16 +419,17 @@ def run_inference(
         text_embedding = next(iter(raw_model.prompt_embeddings.values())).to(device=device)
 
     accumulator = metrics.MetricAccumulator() if gt_dir is not None else None
-    gt_files = (
-        {p.stem: p for p in Path(gt_dir).rglob("*") if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS}
-        if gt_dir is not None
-        else {}
-    )
-    input_root = Path(input_path)
     saved_paths: list[Path] = []
     with torch.no_grad():
-        for image_path in tqdm(list_input_images(input_path), desc="Inference"):
-            image = Image.open(image_path).convert("RGB")
+        for image_path, output_relative in tqdm(files, desc="Inference"):
+            with Image.open(image_path) as source:
+                image = source.convert("RGB")
+            if gt_dir is not None:
+                with Image.open(gt_files[image_path.stem]) as source:
+                    gt = source.convert("RGB")
+                image, gt = preprocessing.geometry(image, gt)
+            else:
+                image, _ = preprocessing.geometry(image, image)
             width, height = image.size
             tensor = (
                 torch.as_tensor(np.asarray(image, dtype=np.float32) / 127.5 - 1.0)
@@ -332,20 +437,25 @@ def run_inference(
                 .unsqueeze(0)
             )
             tensor = _pad_to_multiple(tensor, pad_multiple).to(device=device, dtype=weight_dtype)
-            prediction = model(tensor, text_embedding)
+            if cfg.eval.patchwise:
+                tile_size, overlap = int(cfg.eval.tile_size), int(cfg.eval.tile_overlap)
+                if tile_size % pad_multiple or overlap % pad_multiple:
+                    raise ValueError("Tile size and overlap must be multiples of eval.pad_to_multiple")
+                prediction = predict_tiles(
+                    raw_model, tensor, text_embedding, str(image_path.resolve()), tile_size, overlap
+                )
+            else:
+                prediction = raw_model(
+                    tensor, text_embedding, noise_seeds=raw_model.noise_seeds([str(image_path.resolve())])
+                ).clamp(-1, 1)
             prediction = prediction[:, :, :height, :width]
             prediction_np = metrics.to_numpy_rgb(prediction[0])
-            relative = image_path.relative_to(input_root) if input_root.is_dir() else Path(image_path.name)
-            output_path = save_dir / relative.with_suffix(".png")
+            output_path = save_dir / output_relative
             output_path.parent.mkdir(parents=True, exist_ok=True)
             Image.fromarray((np.clip(prediction_np, 0.0, 1.0) * 255.0).astype(np.uint8)).save(output_path)
             saved_paths.append(output_path)
 
-            if gt_dir is not None and accumulator is not None:
-                gt_path = gt_files.get(image_path.stem)
-                if gt_path is None:
-                    raise FileNotFoundError(f"No GT image matching stem {image_path.stem} in {gt_dir}")
-                gt = Image.open(gt_path).convert("RGB")
+            if accumulator is not None:
                 gt_tensor = torch.as_tensor(np.asarray(gt, dtype=np.float32) / 127.5 - 1.0).permute(2, 0, 1)
                 accumulator.add(
                     "inference",
@@ -369,14 +479,13 @@ def run_inference(
 def save_report(report: EvalReport, path: str | Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "step": report.step,
-                "task_metrics": report.task_metrics,
-                "overall": report.overall,
-            },
-            indent=2,
-        )
-    )
+    payload = {
+        "step": report.step,
+        "task_metrics": report.task_metrics,
+        "overall": report.overall,
+        "vis_paths": [str(path) for path in report.vis_paths],
+    }
+    if report.classification is not None:
+        payload["classification"] = report.classification
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path

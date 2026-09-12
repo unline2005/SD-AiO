@@ -1,0 +1,75 @@
+stage: spade
+output_dir: /home/yhmi/data/output/stage3_spade_foundir_ggt_cdd11
+model:
+  sd_path: /home/yhmi/data/model/sd2.1-base
+  condition_type: deg-aware
+  backbone_type: simple-conv
+  cond_dim: 768
+  num_deg_types: 4
+  dino_path: /home/yhmi/data/model/dinov2-base
+  degradation_classifier_path: /home/yhmi/data/output/stage1_classifier_foundir_ggt_cdd11/final/weights.safetensors
+  pretrained_encoder_path: /home/yhmi/data/output/stage2_vae_foundir_ggt_cdd11/final/weights.safetensors
+  adaln_layers:
+  - down2
+  - down3
+  - mid
+  timestep: 100
+  train_deg_embedding: false
+  lora:
+    unet_rank: 16
+    vae_encoder_rank: 16
+    vae_decoder_rank: 16
+    strategy: full
+  head_hidden_dim: 384
+  condition_mode: legacy
+  spade_version: 2
+data:
+  tasks_file: configs/tasks_foundir_ggt_cdd11.yaml
+  train_image_size: 512
+  paired_sampling: task_balanced
+  num_workers: 8
+  augmentation:
+    hflip_prob: 0.5
+    vflip_prob: 0.0
+    rot90_prob: 0.0
+optimizer:
+  lr: 5.0e-05
+  weight_decay: 0.0
+loss:
+  lambda_l2: 2.0
+  lambda_lpips: 5.0
+  lpips_net: vgg
+  timestep:
+    strategy: fixed
+    value: 100
+trainer:
+  max_steps: 12000
+  train_batch_size: 1
+  gradient_accumulation_steps: 4
+  eval_freq: 2000
+  eval_num_samples: 32
+  checkpointing_steps: 500
+  eval_split: val
+  resume_from: null
+  num_images_save_eval: 60
+  num_processes: 4
+  gpu_ids:
+  - 0
+  - 1
+  - 4
+  - 5
+  cpu_threads_per_process: 2
+  early_stopping:
+    enabled: true
+    metric: psnr
+    mode: max
+    min_delta: 0.02
+    patience: 10
+    min_steps: 6000
+  distributed_timeout_seconds: 1800
+eval:
+  batch_size: 1
+  compute_lpips: true
+  num_samples_per_task: 32
+  noise_seed: 42
+keep_last_checkpoints: 5

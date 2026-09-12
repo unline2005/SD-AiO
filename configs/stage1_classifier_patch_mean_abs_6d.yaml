@@ -1,0 +1,10 @@
+_base_: stage1_classifier_patch_ablation_6d.yaml
+
+output_dir: /home/yhmi/data/output/stage1_classifier_patch_mean_abs_6d
+model:
+  classifier:
+    patch:
+      target: mean_abs
+loss:
+  patch:
+    weight: 1.0

@@ -1,29 +1,35 @@
-stage: vae_encoder
-output_dir: ./output/stage2_vae
+# ====================== 中文注释 ======================
+# 文件：stage2_vae.yaml
+# 作用：Stage 2 VAE 编码器预训练配置。
+# 核心：用 AdaIN 让 LQ latent 对齐 HQ latent。
+# ============================================================
 
-model:
-  sd_path: /root/shared-nvme/model/sd2-1
-  cond_dim: 768
-  adaln_layers: [down2, down3, mid]
-  dino_path: /root/shared-nvme/model/dinov2
-  num_deg_types: 3
-  degradation_classifier_path: /root/shared-nvme/SD-AiO/output/stage1_classifier/final/weights.safetensors
-  pretrained_encoder_path: null
-  train_deg_embedding: false
+stage: vae_encoder  # 中文：当前 Stage 名称
+output_dir: ./output/stage2_vae  # 中文：输出目录
 
-data:
-  tasks_file: configs/tasks_3d.yaml
-  train_image_size: 512
+model:  # 中文：模型配置
+  sd_path: /root/shared-nvme/model/sd2-1  # 中文：SD 2.1 模型路径
+  cond_dim: 768  # 中文：条件特征维度
+  adaln_layers: [down2, down3, mid]  # 中文：插入 AdaIN 的层
+  dino_path: /root/shared-nvme/model/dinov2  # 中文：DINOv2 模型路径
+  num_deg_types: 3  # 中文：退化类别数量
+  degradation_classifier_path: /root/shared-nvme/SD-AiO/output/stage1_classifier/final/weights.safetensors  # 中文：退化分类器权重路径
+  pretrained_encoder_path: null  # 中文：Stage2 预训练编码器路径
+  train_deg_embedding: false  # 中文：是否训练退化 embedding
 
-optimizer:
-  lr: 1e-4
+data:  # 中文：数据配置
+  tasks_file: configs/tasks_3d.yaml  # 中文：共享数据集定义文件
+  train_image_size: 512  # 中文：训练图像尺寸
 
-loss:
-  lambda_l1: 1.0
+optimizer:  # 中文：优化器配置
+  lr: 1e-4  # 中文：配置项
 
-trainer:
-  max_steps: 20000
-  train_batch_size: 8
-  eval_freq: 500
-  eval_num_samples: 4
-  checkpointing_steps: 2000
+loss:  # 中文：损失配置
+  lambda_l1: 1.0  # 中文：L1 损失权重
+
+trainer:  # 中文：训练器配置
+  max_steps: 20000  # 中文：最大训练步数
+  train_batch_size: 8  # 中文：训练批大小
+  eval_freq: 500  # 中文：每隔多少步评估一次
+  eval_num_samples: 4  # 中文：每个任务评估样本数
+  checkpointing_steps: 2000  # 中文：每隔多少步保存 checkpoint

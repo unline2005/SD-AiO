@@ -1,0 +1,10 @@
+_base_: stage1_classifier_patch_ablation_6d.yaml
+
+output_dir: /home/yhmi/data/output/stage1_classifier_patch_mask_6d
+model:
+  classifier:
+    patch:
+      target: mask_fraction
+loss:
+  patch:
+    weight: 0.1

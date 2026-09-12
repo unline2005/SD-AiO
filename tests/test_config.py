@@ -51,3 +51,25 @@ def test_snapshot_roundtrip(tmp_path):
 def test_override_without_equals_raises():
     with pytest.raises(ValueError):
         config.apply_overrides(None, ["bad_override"])
+
+
+def test_classifier_snapshot_does_not_reload_external_tasks(tmp_path):
+    from omegaconf import OmegaConf
+
+    tasks = tmp_path / "tasks.yaml"
+    OmegaConf.save(
+        OmegaConf.create({"train": [{"name": "original", "deg_type": ["haze"]}], "test": []}),
+        tasks,
+    )
+    experiment = tmp_path / "experiment.yaml"
+    OmegaConf.save(
+        OmegaConf.create({"stage": "classifier", "data": {"tasks_file": str(tasks)}}),
+        experiment,
+    )
+    cfg = config.load_config(experiment)
+    saved = config.snapshot(cfg, tmp_path / "run")
+    tasks.unlink()
+    reloaded = config.load_config(saved)
+    assert "tasks_file" not in reloaded.data
+    assert OmegaConf.to_container(reloaded.data.train) == OmegaConf.to_container(cfg.data.train)
+    assert reloaded.data.test == cfg.data.test

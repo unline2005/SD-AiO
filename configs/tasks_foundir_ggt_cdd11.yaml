@@ -1,0 +1,488 @@
+train:
+- name: train_FoundIR_512patch_08Haze
+  deg_type: haze
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/08Haze/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/08Haze/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: train_FoundIR_512patch_09Lowlight_Haze
+  deg_type: haze+lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/09Lowlight_Haze/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/09Lowlight_Haze/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: train_FoundIR_512patch_10Rain
+  deg_type: rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/10Rain/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/10Rain/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: train_FoundIR_512patch_13Rain_Haze
+  deg_type: haze+rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/13Rain_Haze/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/13Rain_Haze/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: train_FoundIR_512patch_14Lowlight
+  deg_type: lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/14Lowlight/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/train/14Lowlight/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: train_GGT-100k_Haze
+  deg_type: haze
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/train/Haze/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/train/Haze/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: GGT
+  sampling_weight: 0.25
+- name: train_GGT-100k_Rain
+  deg_type: rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/train/Rain/lq
+  exclude_filenames:
+  - 04332.png
+  - 06415.png
+  gt_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/train/Rain/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: GGT
+  sampling_weight: 0.25
+- name: train_GGT-100k_Snow
+  deg_type: snow
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/train/Snow/lq
+  exclude_filenames:
+  - 01250.png
+  gt_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/train/Snow/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: GGT
+  sampling_weight: 0.25
+- name: train_GGT-100k_Low-Light
+  deg_type: lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/train/Low-Light/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/train/Low-Light/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: GGT
+  sampling_weight: 0.25
+- name: train_CDD11_haze
+  deg_type: haze
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/haze
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: train_CDD11_rain
+  deg_type: rain
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/rain
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: train_CDD11_snow
+  deg_type: snow
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/snow
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: train_CDD11_low
+  deg_type: lowlight
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/low
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: train_CDD11_haze_rain
+  deg_type: haze+rain
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/haze_rain
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: train_CDD11_haze_snow
+  deg_type: haze+snow
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/haze_snow
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: train_CDD11_low_haze
+  deg_type: lowlight+haze
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/low_haze
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: train_CDD11_low_rain
+  deg_type: lowlight+rain
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/low_rain
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: train_CDD11_low_snow
+  deg_type: lowlight+snow
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/low_snow
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: train_CDD11_low_haze_rain
+  deg_type: lowlight+haze+rain
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/low_haze_rain
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: train_CDD11_low_haze_snow
+  deg_type: lowlight+haze+snow
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/low_haze_snow
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/train/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+val:
+- name: val_FoundIR_512patch_08Haze
+  deg_type: haze
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/08Haze/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/08Haze/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: val_FoundIR_512patch_09Lowlight_Haze
+  deg_type: haze+lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/09Lowlight_Haze/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/09Lowlight_Haze/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: val_FoundIR_512patch_10Rain
+  deg_type: rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/10Rain/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/10Rain/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: val_FoundIR_512patch_13Rain_Haze
+  deg_type: haze+rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/13Rain_Haze/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/13Rain_Haze/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: val_FoundIR_512patch_14Lowlight
+  deg_type: lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/14Lowlight/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/FoundIR_512patch/14Lowlight/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: val_GGT-100k_Haze
+  deg_type: haze
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/GGT-100k/Haze/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/GGT-100k/Haze/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: GGT
+  sampling_weight: 0.25
+- name: val_GGT-100k_Rain
+  deg_type: rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/GGT-100k/Rain/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/GGT-100k/Rain/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: GGT
+  sampling_weight: 0.25
+- name: val_GGT-100k_Snow
+  deg_type: snow
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/GGT-100k/Snow/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/GGT-100k/Snow/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: GGT
+  sampling_weight: 0.25
+- name: val_GGT-100k_Low-Light
+  deg_type: lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/GGT-100k/Low-Light/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/classifier_4d_val/GGT-100k/Low-Light/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: GGT
+  sampling_weight: 0.25
+- name: val_CDD11_haze
+  deg_type: haze
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/haze
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: val_CDD11_rain
+  deg_type: rain
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/rain
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: val_CDD11_snow
+  deg_type: snow
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/snow
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: val_CDD11_low
+  deg_type: lowlight
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/low
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: val_CDD11_haze_rain
+  deg_type: haze+rain
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/haze_rain
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: val_CDD11_haze_snow
+  deg_type: haze+snow
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/haze_snow
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: val_CDD11_low_haze
+  deg_type: lowlight+haze
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/low_haze
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: val_CDD11_low_rain
+  deg_type: lowlight+rain
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/low_rain
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: val_CDD11_low_snow
+  deg_type: lowlight+snow
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/low_snow
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: val_CDD11_low_haze_rain
+  deg_type: lowlight+haze+rain
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/low_haze_rain
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: val_CDD11_low_haze_snow
+  deg_type: lowlight+haze+snow
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/low_haze_snow
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/split_seed42/val/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+test:
+- name: test_FoundIR_512patch_08Haze
+  deg_type: haze
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/08Haze/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/08Haze/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: test_FoundIR_512patch_09Lowlight_Haze
+  deg_type: haze+lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/09Lowlight_Haze/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/09Lowlight_Haze/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: test_FoundIR_512patch_10Rain
+  deg_type: rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/10Rain/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/10Rain/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: test_FoundIR_512patch_13Rain_Haze
+  deg_type: haze+rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/13Rain_Haze/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/13Rain_Haze/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: test_FoundIR_512patch_14Lowlight
+  deg_type: lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/14Lowlight/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/FoundIR_512patch/test/14Lowlight/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: FoundIR
+  sampling_weight: 0.2
+- name: test_GGT-100k_Haze
+  deg_type: haze
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/test/Haze/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/test/Haze/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: GGT
+  sampling_weight: 0.25
+- name: test_GGT-100k_Rain
+  deg_type: rain
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/test/Rain/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/test/Rain/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: GGT
+  sampling_weight: 0.25
+- name: test_GGT-100k_Snow
+  deg_type: snow
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/test/Snow/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/test/Snow/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: GGT
+  sampling_weight: 0.25
+- name: test_GGT-100k_Low-Light
+  deg_type: lowlight
+  lq_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/test/Low-Light/lq
+  gt_path: /home/yhmi/data/complex-degradation-datasets/GGT-100k/test/Low-Light/gt
+  repeat_ratio: 1
+  prompt: a high quality clean image
+  source: GGT
+  sampling_weight: 0.25
+- name: test_CDD11_haze
+  deg_type: haze
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/haze
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: test_CDD11_rain
+  deg_type: rain
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/rain
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: test_CDD11_snow
+  deg_type: snow
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/snow
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: test_CDD11_low
+  deg_type: lowlight
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/low
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: test_CDD11_haze_rain
+  deg_type: haze+rain
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/haze_rain
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: test_CDD11_haze_snow
+  deg_type: haze+snow
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/haze_snow
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: test_CDD11_low_haze
+  deg_type: lowlight+haze
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/low_haze
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: test_CDD11_low_rain
+  deg_type: lowlight+rain
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/low_rain
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: test_CDD11_low_snow
+  deg_type: lowlight+snow
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/low_snow
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: test_CDD11_low_haze_rain
+  deg_type: lowlight+haze+rain
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/low_haze_rain
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image
+- name: test_CDD11_low_haze_snow
+  deg_type: lowlight+haze+snow
+  source: CDD11
+  sampling_weight: 0.09090909090909091
+  lq_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/low_haze_snow
+  gt_path: /home/yhmi/data/complex-degradation-datasets/CDD-11/CDD-11_test/clear
+  repeat_ratio: 1
+  prompt: a high quality clean image

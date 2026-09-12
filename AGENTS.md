@@ -1,53 +1,60 @@
-# AGENTS.md
+# Working on SD-AiO
 
-Guidance for coding agents working on this repository.
+The method is work in progress. Keep research choices explicit and do not claim
+model-family support without an implemented, tested pipeline.
 
-## Project shape
+## Architecture
 
-- `train.py` and `eval.py` are the only entry points.
-- The training loop exists exactly once, in `train.py`.
-- Each stage (`sd_aio/classifier.py`, `sd_aio/vae_encoder.py`,
-  `sd_aio/spade.py`) is self-contained and exports the six-function stage
-  protocol documented in `README.md`.
-- `sd_aio/eval.py` is the only evaluation path; training-periodic eval,
-  standalone benchmark and inference all go through it.
+- `train.py` is the only training loop; `eval.py` is the evaluation CLI.
+- `sd_aio/eval.py` is the shared benchmark/inference path.
+- Each stage is a normal module exporting `build_model`, `make_optimizer`,
+  `set_train_mode`, `set_eval_mode`, `compute_loss`, and `eval_step`.
+- Prefer `nn.Module` composition and small functions to inheritance trees,
+  registries and duplicated loops. Add abstractions only for real consumers.
 
-## Rules
+## Configuration and data
 
-1. **No new argparse options for experiments.** Add YAML keys and use
-   `configs/defaults.yaml` for shared defaults. CLI is only for
-   `--config`, `key=value` overrides, and the fixed eval/inference switches.
-2. **No silent config defaults in code.** Use `config.required()` or a visible
-   key in `defaults.yaml`.
-3. **Never call `model.train()` on a whole multi-component model.** Use
-   `utils.set_train_mode` / `utils.set_eval_mode` so frozen VAE/DINO/GroupNorm
-   submodules stay in eval mode.
-4. **Prepared vs raw model.** In distributed training `model` may be a DDP
-   wrapper. Stage functions receive both `model` (use for forward/backward)
-   and `raw_model` (use for attributes, caches and saving).
-5. **Checkpoints contain trainable parameters only, as safetensors.** Rebuild
-   is `build_model(config.yaml) + load_model_weights()`. Never add
-   `strict=False` loads that hide mismatches.
-6. **Data errors must fail fast.** Missing dirs, zero images, pairing
-   mismatch, denoise tasks without a `_<sigma>` suffix: raise, do not skip.
-7. **Denoise is online and deterministic at eval time.**
-   `sigma / 127.5` in [-1, 1] space; eval noise uses a crc32 seed.
-8. **Text encoder stays on CPU.** `SpadeRestorer` keeps it in `_aux`
-   (unregistered) after prompt caching; never register it as a submodule.
-9. **Keep `tests/` real.** Every new numerical/data/checkpoint behaviour gets
-   a CPU test. Run `pytest` and `ruff check train.py eval.py sd_aio tests`
-   before finishing.
-10. **README/AGENTS stay in sync with the code.** If you change the protocol,
-    update both.
+- Experiments belong in YAML. Shared defaults belong in `configs/defaults.yaml`;
+  do not add experimental argparse flags or silent code defaults.
+- `_base_` paths resolve relative to their declaring YAML. CLI overrides win.
+- Snapshots embed tasks. Use `config.resume_section` for semantic resume checks.
+- Model inputs are RGB tensors in `[-1,1]`. Paired geometry must stay aligned.
+- Missing/ambiguous pairs, empty tasks, invalid labels and inconsistent sizes
+  must fail explicitly. Do not silently skip data.
+- Denoise uses `sigma/127.5`; evaluation noise is deterministic. Preserve the
+  selected image/noise/metric protocol when reproducing an experiment.
 
-## Typical edit cycle
+## Training and persistence
+
+- Stage functions receive prepared `model` and unwrapped `raw_model`. Use the
+  former for trainable forward/backward, the latter for attributes and saving.
+- Do not call `train()` on an entire mixed frozen/trainable model. Use stage
+  mode helpers. GroupNorm has no running statistics; frozen Dropout/BatchNorm
+  still require correct modes.
+- Optimizer/scheduler steps count successful synchronized updates. Preserve
+  effective batch semantics when changing device count or accumulation.
+- Checkpoints contain trainable parameters only. Rebuild frozen pretrained
+  modules from configuration and restore condition sidecars explicitly.
+- Validate all checkpoint keys/shapes before loading. Publish completed saves;
+  do not weaken mismatch checks with an unchecked `strict=False` load.
+- Keep text encoders on CPU after prompt caching; `SpadeRestorer._aux` must not
+  become a registered GPU submodule.
+- Current early stopping/best selection belongs to external supervisors.
+  Training validation uses ordinary weights; EMA evaluation is explicit.
+- Resume restores optimization state, not exact DataLoader/RNG replay.
+
+## Validation
+
+Every new numerical, data or checkpoint behavior needs a meaningful CPU test.
+Keep backward compatibility tests for legacy configuration and checkpoints.
+Use tiny models for integration tests; do not download large weights for unit tests.
 
 ```bash
-# 1. edit YAML / stage module
-# 2. verify
 python -m pytest -q
 ruff check train.py eval.py sd_aio tests
-ruff format train.py eval.py sd_aio tests
-# 3. commit
-git add -A && git commit -m "feat: ..."
+ruff format --check train.py eval.py sd_aio tests
 ```
+
+Keep this contract and the concise README aligned with code. Data/model details
+belong in `docs/`. Do not change active experiments or overwrite their weights
+while refactoring framework code.

@@ -1,0 +1,3 @@
+_base_: stage1_classifier_patch_ablation_6d.yaml
+
+output_dir: /home/yhmi/data/output/stage1_classifier_cls_6d

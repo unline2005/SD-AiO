@@ -1,0 +1,10 @@
+_base_: stage1_classifier_patch_ablation_6d.yaml
+
+output_dir: /home/yhmi/data/output/stage1_classifier_patch_residual_6d
+model:
+  classifier:
+    patch:
+      target: residual
+loss:
+  patch:
+    weight: 1.0

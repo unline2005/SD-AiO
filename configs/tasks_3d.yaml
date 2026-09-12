@@ -1,94 +1,100 @@
+# ====================== 中文注释 ======================
+# 文件：tasks_3d.yaml
+# 作用：共享的 3 退化任务数据集定义。
+# 说明：所有 Stage 都从这里读取 train/test 任务，避免路径散落。
+# ============================================================
+
 # Shared 3-degradation dataset (haze / rain / noise) for all three stages.
 #
 # Paths are the yhmi server layout; edit them once here and every stage picks
 # them up through `data.tasks_file`.
 
-train:
-  - name: Train_Dehaze
-    deg_type: haze
-    lq_path: /root/shared-nvme/data/Train-AIO/OTS_BETA/haze
-    gt_path: /root/shared-nvme/data/Train-AIO/OTS_BETA/clear
-    prompt: "a high quality clear image without haze, high contrast, sharp details"
-    repeat_ratio: 1
-    match_prefix_len: 4
+train:  # 中文：训练任务列表
+  - name: Train_Dehaze  # 中文：名称
+    deg_type: haze  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Train-AIO/OTS_BETA/haze  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Train-AIO/OTS_BETA/clear  # 中文：高质量图路径
+    prompt: "a high quality clear image without haze, high contrast, sharp details"  # 中文：文本提示词
+    repeat_ratio: 1  # 中文：重复采样比例
+    match_prefix_len: 4  # 中文：文件名前缀匹配长度
 
-  - name: Train_Derain
-    deg_type: rain
-    lq_path: /root/shared-nvme/data/Test-AIO/RainTrainL/rain
-    gt_path: /root/shared-nvme/data/Test-AIO/RainTrainL/norain
-    prompt: "a high quality clean image without rain streaks, clear visibility"
-    repeat_ratio: 200
+  - name: Train_Derain  # 中文：名称
+    deg_type: rain  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Test-AIO/RainTrainL/rain  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Test-AIO/RainTrainL/norain  # 中文：高质量图路径
+    prompt: "a high quality clean image without rain streaks, clear visibility"  # 中文：文本提示词
+    repeat_ratio: 200  # 中文：重复采样比例
 
-  - name: Train_Denoise_15
-    deg_type: noise
-    lq_path: /root/shared-nvme/data/Train-AIO/BSD400
-    gt_path: /root/shared-nvme/data/Train-AIO/BSD400
-    prompt: "a high quality clean image without noise, sharp details"
-    repeat_ratio: 100
+  - name: Train_Denoise_15  # 中文：名称
+    deg_type: noise  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Train-AIO/BSD400  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Train-AIO/BSD400  # 中文：高质量图路径
+    prompt: "a high quality clean image without noise, sharp details"  # 中文：文本提示词
+    repeat_ratio: 100  # 中文：重复采样比例
 
-  - name: Train_Denoise_25
-    deg_type: noise
-    lq_path: /root/shared-nvme/data/Train-AIO/BSD400
-    gt_path: /root/shared-nvme/data/Train-AIO/BSD400
-    prompt: "a high quality clean image without noise, sharp details"
-    repeat_ratio: 100
+  - name: Train_Denoise_25  # 中文：名称
+    deg_type: noise  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Train-AIO/BSD400  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Train-AIO/BSD400  # 中文：高质量图路径
+    prompt: "a high quality clean image without noise, sharp details"  # 中文：文本提示词
+    repeat_ratio: 100  # 中文：重复采样比例
 
-  - name: Train_Denoise_50
-    deg_type: noise
-    lq_path: /root/shared-nvme/data/Train-AIO/BSD400
-    gt_path: /root/shared-nvme/data/Train-AIO/BSD400
-    prompt: "a high quality clean image without noise, sharp details"
-    repeat_ratio: 100
+  - name: Train_Denoise_50  # 中文：名称
+    deg_type: noise  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Train-AIO/BSD400  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Train-AIO/BSD400  # 中文：高质量图路径
+    prompt: "a high quality clean image without noise, sharp details"  # 中文：文本提示词
+    repeat_ratio: 100  # 中文：重复采样比例
 
-  - name: Train_Denoise_WED_15
-    deg_type: noise
-    lq_path: /root/shared-nvme/data/Train-AIO/WaterlooED
-    gt_path: /root/shared-nvme/data/Train-AIO/WaterlooED
-    prompt: "a high quality clean image without noise, sharp details"
-    repeat_ratio: 2
+  - name: Train_Denoise_WED_15  # 中文：名称
+    deg_type: noise  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Train-AIO/WaterlooED  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Train-AIO/WaterlooED  # 中文：高质量图路径
+    prompt: "a high quality clean image without noise, sharp details"  # 中文：文本提示词
+    repeat_ratio: 2  # 中文：重复采样比例
 
-  - name: Train_Denoise_WED_25
-    deg_type: noise
-    lq_path: /root/shared-nvme/data/Train-AIO/WaterlooED
-    gt_path: /root/shared-nvme/data/Train-AIO/WaterlooED
-    prompt: "a high quality clean image without noise, sharp details"
-    repeat_ratio: 2
+  - name: Train_Denoise_WED_25  # 中文：名称
+    deg_type: noise  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Train-AIO/WaterlooED  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Train-AIO/WaterlooED  # 中文：高质量图路径
+    prompt: "a high quality clean image without noise, sharp details"  # 中文：文本提示词
+    repeat_ratio: 2  # 中文：重复采样比例
 
-  - name: Train_Denoise_WED_50
-    deg_type: noise
-    lq_path: /root/shared-nvme/data/Train-AIO/WaterlooED
-    gt_path: /root/shared-nvme/data/Train-AIO/WaterlooED
-    prompt: "a high quality clean image without noise, sharp details"
-    repeat_ratio: 2
+  - name: Train_Denoise_WED_50  # 中文：名称
+    deg_type: noise  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Train-AIO/WaterlooED  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Train-AIO/WaterlooED  # 中文：高质量图路径
+    prompt: "a high quality clean image without noise, sharp details"  # 中文：文本提示词
+    repeat_ratio: 2  # 中文：重复采样比例
 
-test:
-  - name: Test_Dehaze
-    deg_type: haze
-    lq_path: /root/shared-nvme/data/Test-AIO/SOTS/outdoor/hazy
-    gt_path: /root/shared-nvme/data/Test-AIO/SOTS/outdoor/gt
-    prompt: "a high quality clear image without haze, high contrast, sharp details"
-    match_prefix_len: 4
+test:  # 中文：测试任务列表
+  - name: Test_Dehaze  # 中文：名称
+    deg_type: haze  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Test-AIO/SOTS/outdoor/hazy  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Test-AIO/SOTS/outdoor/gt  # 中文：高质量图路径
+    prompt: "a high quality clear image without haze, high contrast, sharp details"  # 中文：文本提示词
+    match_prefix_len: 4  # 中文：文件名前缀匹配长度
 
-  - name: Test_Derain
-    deg_type: rain
-    lq_path: /root/shared-nvme/data/Test-AIO/Rain100L/rainy
-    gt_path: /root/shared-nvme/data/Test-AIO/Rain100L/norain
-    prompt: "a high quality clean image without rain streaks, clear visibility"
+  - name: Test_Derain  # 中文：名称
+    deg_type: rain  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Test-AIO/Rain100L/rainy  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Test-AIO/Rain100L/norain  # 中文：高质量图路径
+    prompt: "a high quality clean image without rain streaks, clear visibility"  # 中文：文本提示词
 
-  - name: Test_Denoise_15
-    deg_type: noise
-    lq_path: /root/shared-nvme/data/Test-AIO/BSD68/original
-    gt_path: /root/shared-nvme/data/Test-AIO/BSD68/original
-    prompt: "a high quality clean image without noise, sharp details"
+  - name: Test_Denoise_15  # 中文：名称
+    deg_type: noise  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Test-AIO/BSD68/original  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Test-AIO/BSD68/original  # 中文：高质量图路径
+    prompt: "a high quality clean image without noise, sharp details"  # 中文：文本提示词
 
-  - name: Test_Denoise_25
-    deg_type: noise
-    lq_path: /root/shared-nvme/data/Test-AIO/BSD68/original
-    gt_path: /root/shared-nvme/data/Test-AIO/BSD68/original
-    prompt: "a high quality clean image without noise, sharp details"
+  - name: Test_Denoise_25  # 中文：名称
+    deg_type: noise  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Test-AIO/BSD68/original  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Test-AIO/BSD68/original  # 中文：高质量图路径
+    prompt: "a high quality clean image without noise, sharp details"  # 中文：文本提示词
 
-  - name: Test_Denoise_50
-    deg_type: noise
-    lq_path: /root/shared-nvme/data/Test-AIO/BSD68/original
-    gt_path: /root/shared-nvme/data/Test-AIO/BSD68/original
-    prompt: "a high quality clean image without noise, sharp details"
+  - name: Test_Denoise_50  # 中文：名称
+    deg_type: noise  # 中文：退化类型
+    lq_path: /root/shared-nvme/data/Test-AIO/BSD68/original  # 中文：低质量图路径
+    gt_path: /root/shared-nvme/data/Test-AIO/BSD68/original  # 中文：高质量图路径
+    prompt: "a high quality clean image without noise, sharp details"  # 中文：文本提示词

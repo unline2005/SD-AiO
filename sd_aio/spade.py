@@ -7,22 +7,40 @@ The optional condition module lives on the UNet ResBlock ``conv2`` layers.
 
 from __future__ import annotations
 
+import zlib
+from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 import torch
 import torch.nn.functional as F
-from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel
+from diffusers import (
+    AutoencoderKL,
+    DDPMScheduler,
+    UNet2DConditionModel,
+)
 from diffusers.models.resnet import ResnetBlock2D
 from omegaconf import OmegaConf
 from peft import LoraConfig, get_peft_model
 from torch import nn
 from torchvision import models as torchvision_models
-from transformers import AutoTokenizer, CLIPTextModel
+from transformers import AutoTokenizer, CLIPTextConfig, CLIPTextModel
 
 from sd_aio import config as configlib
-from sd_aio import metrics, utils
+from sd_aio import metrics, optim, utils
+from sd_aio.backends import (
+    DIFFUSION_PREDICTIONS,
+    LatentAffine,
+    diffusion_x0,
+    require_backend,
+    validate_sd_unet_configs,
+)
 from sd_aio.classifier import build_deg_extractor
-from sd_aio.vae_encoder import PreRestoreEncoder, _load_pretrained_encoder
+from sd_aio.vae_encoder import (
+    PreRestoreEncoder,
+    _load_pretrained_encoder,
+    load_condition,
+    save_condition,
+)
 
 BackboneType = Literal["simple-conv", "resnet18", "convnext_tiny"]
 
@@ -63,7 +81,7 @@ class Spade(nn.Module):
 
     def __init__(self, output_channels: int, cond_input_channels: int, kernel_size: int = 3) -> None:
         super().__init__()
-        self.norm = nn.GroupNorm(num_groups=32, num_channels=output_channels)
+        self.norm = nn.GroupNorm(num_groups=32, num_channels=output_channels, affine=False)
         padding = kernel_size // 2
         self.shared = nn.Sequential(
             nn.Conv2d(cond_input_channels, 128, kernel_size=kernel_size, padding=padding),
@@ -71,6 +89,9 @@ class Spade(nn.Module):
         )
         self.gamma = nn.Conv2d(128, output_channels, kernel_size=kernel_size, padding=padding)
         self.beta = nn.Conv2d(128, output_channels, kernel_size=kernel_size, padding=padding)
+        for layer in (self.gamma, self.beta):
+            nn.init.zeros_(layer.weight)
+            nn.init.zeros_(layer.bias)
 
     def forward(self, features: torch.Tensor, cond_feat: torch.Tensor) -> torch.Tensor:
         if cond_feat.shape[2:] != features.shape[2:]:
@@ -79,7 +100,7 @@ class Spade(nn.Module):
             )
         normalized = self.norm(features)
         shared = self.shared(cond_feat)
-        return normalized * (1.0 + self.gamma(shared)) + self.beta(shared)
+        return features + normalized * self.gamma(shared) + self.beta(shared)
 
 
 class SpadeWrapper(nn.Module):
@@ -319,12 +340,12 @@ def _attach_vae_lora(vae: nn.Module, encoder_rank: int = 0, decoder_rank: int = 
         parts = "|".join(
             part for part, rank in (("encoder", encoder_rank), ("decoder", decoder_rank)) if rank > 0
         )
-        attach(encoder_rank, rf"^({parts}){VAE_LORA_TARGET}", "restoration")
+        attach(encoder_rank, rf"^({parts}).*{VAE_LORA_TARGET}", "restoration")
         return
     if encoder_rank > 0:
-        attach(encoder_rank, rf"^encoder{VAE_LORA_TARGET}", "restoration_encoder")
+        attach(encoder_rank, rf"^encoder.*{VAE_LORA_TARGET}", "restoration_encoder")
     if decoder_rank > 0:
-        attach(decoder_rank, rf"^decoder{VAE_LORA_TARGET}", "restoration_decoder")
+        attach(decoder_rank, rf"^decoder.*{VAE_LORA_TARGET}", "restoration_decoder")
 
 
 def _mark_lora_trainable(module: nn.Module) -> None:
@@ -351,6 +372,7 @@ class SpadeRestorer(nn.Module):
         pretrained_encoder: PreRestoreEncoder | None = None,
         lpips_model: nn.Module | None = None,
         timestep: int = 100,
+        eval_noise_seed: int = 42,
         tokenizer: Any | None = None,
         text_encoder: CLIPTextModel | None = None,
     ) -> None:
@@ -363,16 +385,50 @@ class SpadeRestorer(nn.Module):
         self.pretrained_encoder = pretrained_encoder
         self.lpips = lpips_model
         self.default_timestep = int(timestep)
-        self.scaling_factor = float(vae.config.scaling_factor)
+        self.eval_noise_seed = int(eval_noise_seed)
+        self.prediction_type = str(noise_scheduler.config.prediction_type)
+        if self.prediction_type not in DIFFUSION_PREDICTIONS:
+            raise ValueError(f"Unsupported diffusion prediction_type: {self.prediction_type}")
+        self.latent_affine = LatentAffine(
+            float(vae.config.scaling_factor), float(vae.config.shift_factor or 0.0)
+        )
+        self.scaling_factor = self.latent_affine.scale
         self.prompt_embeddings = nn.ParameterDict()
-        # Kept as plain attributes (not registered submodules) so the text
-        # encoder stays on CPU and never gets pulled onto GPU by model.to().
+
         self._aux: dict[str, Any] = {
             "tokenizer": tokenizer,
             "text_encoder": text_encoder,
         }
 
-    # ------------------------------------------------------------------ helpers
+    def noise_seeds(self, image_ids):
+        return [zlib.crc32(f"{self.eval_noise_seed}:{name}".encode()) for name in image_ids]
+
+    @staticmethod
+    def noise_like(reference, seeds):
+        if seeds is None:
+            return torch.randn_like(reference)
+        if len(seeds) != reference.shape[0]:
+            raise ValueError("One noise seed is required per image")
+        return torch.stack(
+            [
+                torch.randn(
+                    reference.shape[1:],
+                    device=reference.device,
+                    dtype=reference.dtype,
+                    generator=torch.Generator(device=reference.device).manual_seed(seed),
+                )
+                for seed in seeds
+            ]
+        )
+
+    def save_auxiliary(self, weights_path):
+        if self.deg_extractor is not None:
+            save_condition(self.deg_extractor, weights_path)
+
+    def load_auxiliary(self, weights_path):
+        if self.deg_extractor is not None:
+            load_condition(self.deg_extractor, weights_path)
+
     def text_embedding_for(self, task_names: list[str]) -> torch.Tensor:
         missing = [name for name in task_names if name not in self.prompt_embeddings]
         if missing:
@@ -402,21 +458,28 @@ class SpadeRestorer(nn.Module):
             embedding = text_encoder(tokens)[0].detach()
         return embedding.to(device=device if device is not None else embedding.device, dtype=dtype)
 
-    # ------------------------------------------------------------------ encode/decode
-    def encode_lq(self, lq_image: torch.Tensor, f_deg: torch.Tensor | None = None) -> torch.Tensor:
+    def encode_lq(
+        self, lq_image: torch.Tensor, f_deg: torch.Tensor | None = None, noise_seeds=None
+    ) -> torch.Tensor:
         if self.pretrained_encoder is not None:
             if f_deg is None:
                 f_deg = self.deg_extractor(lq_image) if self.deg_extractor is not None else None
             if f_deg is None:
                 raise RuntimeError("pretrained_encoder requires a degradation feature extractor")
             z_raw = self.pretrained_encoder(lq_image, f_deg)
-            z_mean = self.vae.quant_conv(z_raw)[:, :4]
-            return z_mean * self.scaling_factor
+            z_mean = self.vae.quant_conv(z_raw)[:, : self.vae.config.latent_channels]
+            return self.latent_affine.encode(z_mean)
         posterior = self.vae.encode(lq_image).latent_dist
-        return posterior.sample() * self.scaling_factor
+        if noise_seeds is None:
+            latent = posterior.sample()
+        else:
+            latent = posterior.mean + posterior.std * self.noise_like(
+                posterior.mean, [seed ^ 0x5A5A5A5A for seed in noise_seeds]
+            )
+        return self.latent_affine.encode(latent)
 
     def decode_latent(self, latent: torch.Tensor) -> torch.Tensor:
-        return self.vae.decode(latent / self.scaling_factor).sample.clamp(-1.0, 1.0)
+        return self.vae.decode(self.latent_affine.decode(latent)).sample
 
     def _x0_coeff(self, timesteps: torch.Tensor) -> torch.Tensor:
         alphas = self.noise_scheduler.alphas_cumprod.to(device=timesteps.device, dtype=torch.float32)[
@@ -425,16 +488,17 @@ class SpadeRestorer(nn.Module):
         alphas = alphas.view(-1, 1, 1, 1)
         return ((1.0 - alphas) ** 0.5) / (alphas**0.5)
 
-    # ------------------------------------------------------------------ one forward for train + eval + inference
     def forward(
         self,
         lq_image: torch.Tensor,
         text_embedding: torch.Tensor | None = None,
         timestep: int | None = None,
+        noise_seeds: list[int] | None = None,
     ) -> torch.Tensor:
+        lq_image = lq_image.to(dtype=next(self.vae.parameters()).dtype)
         f_deg = self.deg_extractor(lq_image) if self.deg_extractor is not None else None
-        z0 = self.encode_lq(lq_image, f_deg=f_deg)
-        noise = torch.randn_like(z0)
+        z0 = self.encode_lq(lq_image, f_deg=f_deg, noise_seeds=noise_seeds)
+        noise = self.noise_like(z0, noise_seeds)
         if timestep is None:
             timestep = self.default_timestep
         timesteps = torch.full((z0.shape[0],), int(timestep), device=z0.device, dtype=torch.long)
@@ -445,8 +509,12 @@ class SpadeRestorer(nn.Module):
         if text_embedding is None:
             raise RuntimeError("SpadeRestorer.forward requires text_embedding")
         noise_pred = self.unet(z_t, timesteps, encoder_hidden_states=text_embedding).sample
-        coeff = self._x0_coeff(timesteps).to(device=z0.device, dtype=z0.dtype)
-        denoised = z0 + coeff * (noise - noise_pred)
+        if self.prediction_type == "epsilon":
+            coeff = self._x0_coeff(timesteps).to(device=z0.device, dtype=z0.dtype)
+            denoised = z0 + coeff * (noise - noise_pred)
+        else:
+            alphas = self.noise_scheduler.alphas_cumprod.to(z_t.device)[timesteps]
+            denoised = diffusion_x0(z_t, noise_pred, alphas, self.prediction_type)
         return self.decode_latent(denoised)
 
 
@@ -487,7 +555,21 @@ def _build_condition_module(cfg: OmegaConf, unet: nn.Module) -> nn.Module | None
 
 def build_model(cfg: OmegaConf, device: torch.device | None = None) -> SpadeRestorer:
     model_cfg = cfg.model
+    if int(model_cfg.spade_version) != 2:
+        raise ValueError("Stage3 requires residual SPADE version 2")
+    if cfg.loss.timestep.strategy == "fixed" and int(cfg.loss.timestep.value) != int(model_cfg.timestep):
+        raise ValueError("Fixed training timestep must match model.timestep used for eval")
     sd_path = str(model_cfg.sd_path)
+    require_backend(str(configlib.required(cfg, "model.backend")))
+    condition_type = str(configlib.required(cfg, "model.condition_type"))
+    validate_sd_unet_configs(
+        UNet2DConditionModel.load_config(sd_path, subfolder="unet"),
+        AutoencoderKL.load_config(sd_path, subfolder="vae"),
+        CLIPTextConfig.from_pretrained(sd_path, subfolder="text_encoder").to_dict(),
+        DDPMScheduler.load_config(sd_path, subfolder="scheduler"),
+        condition_channels=cfg.model.condition_channels if condition_type != "none" else None,
+        text_dim=int(cfg.model.text_dim) if condition_type in ("deg-aware", "deg_aware_sft") else None,
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(sd_path, subfolder="tokenizer")
     text_encoder = CLIPTextModel.from_pretrained(sd_path, subfolder="text_encoder")
@@ -504,7 +586,6 @@ def build_model(cfg: OmegaConf, device: torch.device | None = None) -> SpadeRest
     vae_encoder_rank = int(lora_cfg.get("vae_encoder_rank", 0) or 0)
     vae_decoder_rank = int(lora_cfg.get("vae_decoder_rank", 0) or 0)
 
-    # LoRA first: later SPADE wraps the (possibly LoRA-wrapped) conv2 layer.
     if unet_rank > 0:
         _attach_unet_lora(unet, unet_rank, str(lora_cfg.get("strategy", "full")))
         _mark_lora_trainable(unet)
@@ -542,6 +623,9 @@ def build_model(cfg: OmegaConf, device: torch.device | None = None) -> SpadeRest
     )
     deg_extractor = build_deg_extractor(cfg) if needs_deg_extractor else None
 
+    if pretrained_encoder is not None:
+        load_condition(deg_extractor, model_cfg.pretrained_encoder_path)
+
     lpips_model = None
     if float(cfg.loss.get("lambda_lpips", 0.0)) > 0:
         lpips_model = metrics.load_lpips(str(cfg.loss.get("lpips_net", "vgg")), device=None)
@@ -554,12 +638,13 @@ def build_model(cfg: OmegaConf, device: torch.device | None = None) -> SpadeRest
         deg_extractor=deg_extractor,
         pretrained_encoder=pretrained_encoder,
         lpips_model=lpips_model,
-        timestep=int(model_cfg.get("timestep", 100)),
+        timestep=int(model_cfg.timestep),
+        eval_noise_seed=int(cfg.eval.noise_seed),
         tokenizer=tokenizer,
         text_encoder=text_encoder,
     )
     all_tasks = []
-    for split in ("train", "test"):
+    for split in ("train", "val", "test"):
         node = cfg.data.get(split)
         if node is not None:
             all_tasks.extend(OmegaConf.to_container(node, resolve=True))
@@ -574,14 +659,7 @@ def make_optimizer(model: SpadeRestorer, cfg: OmegaConf) -> torch.optim.Optimize
     trainable = [parameter for parameter in model.parameters() if parameter.requires_grad]
     if not trainable:
         raise RuntimeError("Stage-3 model has no trainable parameters; enable a LoRA/condition module")
-    optimizer_cfg = cfg.optimizer
-    return torch.optim.AdamW(
-        trainable,
-        lr=float(optimizer_cfg.lr),
-        betas=(float(optimizer_cfg.betas[0]), float(optimizer_cfg.betas[1])),
-        weight_decay=float(optimizer_cfg.weight_decay),
-        eps=float(optimizer_cfg.eps),
-    )
+    return optim.build_optimizer(trainable, cfg.optimizer)
 
 
 def set_train_mode(model: SpadeRestorer) -> None:
@@ -622,9 +700,25 @@ def eval_step(
     batch: dict[str, Any],
 ) -> dict[str, Any]:
     text_embedding = raw_model.text_embedding_for(batch["task_name"])
-    prediction = model(batch["lq"], text_embedding, timestep=raw_model.default_timestep)
+    prediction = model(
+        batch["lq"],
+        text_embedding,
+        timestep=raw_model.default_timestep,
+        noise_seeds=raw_model.noise_seeds(batch["image_id"]),
+    ).clamp(-1, 1)
     return {
         "pred": prediction,
         "gt": batch["gt"],
         "task_name": batch["task_name"],
     }
+
+
+def validate_resume(cfg, resume_path):
+    path = Path(resume_path)
+    output = path.parent.parent if path.name.startswith("checkpoint-") else path
+    saved = OmegaConf.load(output / "config.yaml")
+    if saved.model.get("spade_version") != cfg.model.spade_version:
+        raise ValueError("SPADE architecture changed; start a fresh Stage3 experiment")
+    for key in ("model", "data", "loss"):
+        if configlib.resume_section(saved, key) != configlib.resume_section(cfg, key):
+            raise ValueError(f"Stage3 resume changes {key}; use a new experiment")

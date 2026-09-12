@@ -1,33 +1,24 @@
-#!/usr/bin/env python3
-"""Single training entry point for every stage.
-
-Usage::
-
-    accelerate launch train.py --config configs/stage1_classifier.yaml
-    accelerate launch train.py --config configs/stage3_spade.yaml trainer.max_steps=1000
-
-The stage is chosen by ``stage:`` in the YAML file.  This file contains the
-only training loop in the repository; stage modules only implement the
-six-function protocol (build / optimizer / train-mode / eval-mode / loss /
-eval-step).
-"""
-
 from __future__ import annotations
 
 import argparse
 import logging
 import sys
 import time
+from datetime import timedelta
 from pathlib import Path
 
 import torch
 from accelerate import Accelerator
-from accelerate.utils import set_seed
+from accelerate.utils import (
+    DistributedDataParallelKwargs,
+    InitProcessGroupKwargs,
+    set_seed,
+)
 from diffusers.optimization import get_scheduler
 from omegaconf import OmegaConf
 from tqdm.auto import tqdm
 
-from sd_aio import checkpoint, metrics, utils
+from sd_aio import checkpoint, metrics, runtime, utils
 from sd_aio import config as configlib
 from sd_aio import data as datalib
 from sd_aio.eval import run_eval, save_report
@@ -75,28 +66,41 @@ def _resolve_resume_path(cfg: OmegaConf) -> Path | None:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     cfg = configlib.load_config(args.config, args.overrides)
+    configlib.validate_training(cfg)
     stage_name = str(cfg.stage)
     stage = utils.load_stage(stage_name)
 
     log_with = cfg.trainer.get("log_with")
     accelerator = Accelerator(
+        kwargs_handlers=[
+            InitProcessGroupKwargs(timeout=timedelta(seconds=int(cfg.trainer.distributed_timeout_seconds)))
+        ]
+        + ([DistributedDataParallelKwargs(broadcast_buffers=False)] if stage_name == "classifier" else []),
         gradient_accumulation_steps=int(cfg.trainer.gradient_accumulation_steps),
         mixed_precision=str(cfg.mixed_precision),
         log_with=log_with,
+        # Classifier max_steps counts optimizer updates, independent of world size.
+        step_scheduler_with_optimizer=False,
     )
     is_main = accelerator.is_main_process
     is_local_main = accelerator.is_local_main_process
     if cfg.seed is not None:
         set_seed(int(cfg.seed))
 
+    resume_path = _resolve_resume_path(cfg)
+    if resume_path is not None and hasattr(stage, "validate_resume"):
+        stage.validate_resume(cfg, resume_path)
     output_dir = Path(cfg.output_dir)
     logger = setup_logger(output_dir, is_main)
     if is_main:
         configlib.snapshot(cfg, output_dir)
+        runtime.write_metadata(output_dir, world_size=accelerator.num_processes, seed=cfg.seed)
         logger.info("SD-AiO training | stage=%s | output=%s", stage_name, output_dir)
         logger.info("Config: %s", args.config)
 
-    train_loader, test_loaders = datalib.build_loaders(cfg, verbose=is_main)
+    train_loader, test_loaders = datalib.build_loaders(
+        cfg, verbose=is_main, eval_split=str(cfg.trainer.get("eval_split", "test"))
+    )
     if len(train_loader) == 0:
         raise RuntimeError("Train loader is empty; check cfg.data.train paths and batch size")
     model = stage.build_model(cfg, accelerator.device)
@@ -128,8 +132,9 @@ def main(argv: list[str] | None = None) -> None:
         ema = checkpoint.ModelEMA(raw_model, decay=float(cfg.ema.decay))
         if resume_path is not None:
             ema_file = Path(restored_dir) / checkpoint.EMA_NAME
-            if ema_file.exists():
-                ema.load_state_dict(ema_file)
+            if not ema_file.exists():
+                raise FileNotFoundError(f"EMA resume requires {ema_file}")
+            ema.load_state_dict(ema_file)
 
     weight_dtype = utils.weight_dtype_for(str(cfg.mixed_precision))
     eval_lpips = None
@@ -155,6 +160,7 @@ def main(argv: list[str] | None = None) -> None:
     start_time = time.time()
     finished_step = global_step
     completed = False
+    metric_window = runtime.MetricWindow()
 
     try:
         while global_step < max_steps:
@@ -162,14 +168,21 @@ def main(argv: list[str] | None = None) -> None:
                 batch = utils.move_batch(batch, accelerator.device, weight_dtype)
                 with accelerator.accumulate(model):
                     loss, logs = stage.compute_loss(model, raw_model, batch, cfg)
+                    metric_window.add({**logs, "loss": loss.detach()})
                     accelerator.backward(loss)
                     if accelerator.sync_gradients:
+                        if hasattr(stage, "before_optimizer_step"):
+                            stage.before_optimizer_step(raw_model, cfg, global_step)
                         accelerator.clip_grad_norm_(model.parameters(), float(cfg.trainer.max_grad_norm))
                     optimizer.step()
-                    scheduler.step()
+                    if accelerator.sync_gradients and not accelerator.optimizer_step_was_skipped:
+                        scheduler.step()
                     optimizer.zero_grad(set_to_none=True)
 
                 if not accelerator.sync_gradients:
+                    continue
+                logs = metric_window.pop()
+                if accelerator.optimizer_step_was_skipped:
                     continue
 
                 global_step += 1
@@ -199,6 +212,29 @@ def main(argv: list[str] | None = None) -> None:
                             lr,
                             1.0 / max(steps_per_sec, 1e-12),
                         )
+                    if is_main:
+                        runtime.append_metrics(
+                            output_dir,
+                            global_step,
+                            {"loss": gathered, "lr": lr, "seconds_per_step": 1.0 / max(steps_per_sec, 1e-12)},
+                        )
+                    if "loss_pixel_mse" in logs or "loss_pixel_l1" in logs:
+                        pixel_key = "loss_pixel_l1" if "loss_pixel_l1" in logs else "loss_pixel_mse"
+                        components = (
+                            accelerator.gather(
+                                torch.tensor(
+                                    [logs[pixel_key], logs.get("loss_lpips", 0.0)], device=accelerator.device
+                                )
+                            )
+                            .reshape(-1, 2)
+                            .mean(0)
+                        )
+                        if is_main:
+                            logger.info(
+                                "loss terms (unweighted) | %s=%.6f | lpips=%.6f",
+                                pixel_key,
+                                *components.tolist(),
+                            )
                     start_time = time.time()
 
                 if eval_freq > 0 and global_step % eval_freq == 0 and test_loaders:
@@ -222,6 +258,23 @@ def main(argv: list[str] | None = None) -> None:
                             report,
                             output_dir / "eval" / f"metrics_step_{global_step:08d}.json",
                         )
+                        tsne_cfg = cfg.eval.get("tsne")
+                        if (
+                            stage_name == "classifier"
+                            and tsne_cfg is not None
+                            and bool(tsne_cfg.enabled)
+                            and global_step % int(tsne_cfg.every_steps) == 0
+                        ):
+                            tsne_dir = stage.save_tsne_visualization(
+                                raw_model,
+                                test_loaders,
+                                cfg,
+                                device=accelerator.device,
+                                weight_dtype=weight_dtype,
+                                output_dir=output_dir,
+                                step=global_step,
+                            )
+                            logger.info("Saved classifier t-SNE to %s", tsne_dir)
                     accelerator.wait_for_everyone()
                     stage.set_train_mode(raw_model)
 
@@ -240,6 +293,7 @@ def main(argv: list[str] | None = None) -> None:
                 if global_step >= max_steps:
                     break
         completed = True
+
     finally:
         accelerator.wait_for_everyone()
         if is_main:

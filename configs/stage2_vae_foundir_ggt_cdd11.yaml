@@ -1,0 +1,68 @@
+stage: vae_encoder
+output_dir: /home/yhmi/data/output/stage2_vae_foundir_ggt_cdd11
+seed: 42
+mixed_precision: bf16
+model:
+  sd_path: /home/yhmi/data/model/sd2.1-base
+  dino_path: /home/yhmi/data/model/dinov2-base
+  num_deg_types: 4
+  head_hidden_dim: 384
+  cond_dim: 768
+  adaln_layers:
+  - down2
+  - down3
+  - mid
+  degradation_classifier_path: /home/yhmi/data/output/stage1_classifier_foundir_ggt_cdd11/final/weights.safetensors
+  pretrained_encoder_path: null
+  train_deg_embedding: false
+  vae_training:
+    freeze_encoder: false
+    target: gt
+data:
+  tasks_file: configs/tasks_foundir_ggt_cdd11.yaml
+  paired_sampling: task_balanced
+  train_image_size: 512
+  num_workers: 8
+  augmentation:
+    hflip_prob: 0.5
+    vflip_prob: 0.0
+    rot90_prob: 0.0
+optimizer:
+  lr: 1.0e-05
+loss:
+  lambda_pixel: 1.0
+  lambda_lpips: 1.0
+  lpips_net: vgg
+  pixel_type: l1
+trainer:
+  eval_split: val
+  max_steps: 18000
+  train_batch_size: 2
+  gradient_accumulation_steps: 3
+  eval_freq: 2000
+  eval_num_samples: 32
+  num_images_save_eval: 60
+  checkpointing_steps: 500
+  log_every: 10
+  resume_from: null
+  num_processes: 4
+  gpu_ids:
+  - 0
+  - 1
+  - 4
+  - 5
+  cpu_threads_per_process: 2
+  early_stopping:
+    enabled: true
+    metric: psnr
+    mode: max
+    min_delta: 0.02
+    patience: 10
+    min_steps: 6000
+  distributed_timeout_seconds: 1800
+eval:
+  batch_size: 1
+  compute_lpips: true
+  num_samples_per_task: 32
+  lpips_net: vgg
+keep_last_checkpoints: 5

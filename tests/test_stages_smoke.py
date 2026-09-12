@@ -8,7 +8,7 @@ from omegaconf import OmegaConf
 from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import Dinov2Config, Dinov2Model
 
-from sd_aio import classifier, utils
+from sd_aio import classifier
 from sd_aio.spade import MultiScaleExtractor, SpadeConditionModule, _attach_unet_lora, _mark_lora_trainable
 from sd_aio.vae_encoder import PreRestoreEncoder
 from tests.helpers import (
@@ -47,7 +47,7 @@ def test_classifier_protocol_loss_and_metrics():
     assert 0.0 < logs["loss"] < 3.0
     loss.backward()
 
-    utils.set_train_mode(model)
+    classifier.set_train_mode(model)
     assert model.head.training
     assert not model.encoder.training
 
@@ -117,9 +117,9 @@ def test_spade_restorer_single_forward_train_eval_shared():
     text = model.text_embedding_for(["Task"])
     prediction = model(lq, text, timestep=10)
     assert prediction.shape == (1, 3, 64, 64)
-    assert float(prediction.detach().min()) >= -1.0 and float(prediction.detach().max()) <= 1.0
+    assert torch.isfinite(prediction).all()
 
-    batch = {"lq": lq, "gt": lq, "task_name": ["Task"]}
+    batch = {"lq": lq, "gt": lq, "task_name": ["Task"], "image_id": ["test-image"]}
     from omegaconf import OmegaConf
 
     import sd_aio.spade as stage
@@ -149,7 +149,7 @@ def test_stage_loss_accepts_ddp_prepared_model_and_raw_model():
     try:
         ddp_model = DDP(model)
         lq = torch.randn(1, 3, 64, 64)
-        batch = {"lq": lq, "gt": lq, "task_name": ["Task"]}
+        batch = {"lq": lq, "gt": lq, "task_name": ["Task"], "image_id": ["test-image"]}
         cfg = OmegaConf.create(
             {"loss": {"lambda_l2": 1.0, "lambda_lpips": 0.0, "timestep": {"strategy": "fixed", "value": 10}}}
         )

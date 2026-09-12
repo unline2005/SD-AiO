@@ -1,0 +1,62 @@
+stage: classifier
+output_dir: /home/yhmi/data/output/stage1_classifier_foundir_ggt_cdd11
+model:
+  dino_path: /home/yhmi/data/model/dinov2-base
+  num_deg_types: 4
+  freeze_encoder: false
+  head_hidden_dim: 384
+data:
+  tasks_file: configs/tasks_classifier_foundir_ggt_cdd11.yaml
+  deg_types:
+  - haze
+  - rain
+  - snow
+  - lowlight
+  classification_sampling: task_balanced
+  image_size: 512
+  num_workers: 8
+  prefetch_factor: 2
+  augmentation:
+    hflip_prob: 0.5
+optimizer:
+  backbone_lr: 5.0e-06
+  head_lr: 0.0001
+loss:
+  focal_gamma: 2.0
+trainer:
+  eval_split: val
+  resume_from: null
+  num_processes: 4
+  gpu_ids:
+  - 0
+  - 1
+  - 4
+  - 5
+  cpu_threads_per_process: 2
+  max_steps: 6000
+  train_batch_size: 48
+  gradient_accumulation_steps: 1
+  eval_freq: 500
+  eval_num_samples: 256
+  checkpointing_steps: 500
+  early_stopping:
+    enabled: true
+    metric: f1
+    mode: max
+    min_delta: 0.001
+    patience: 6
+    min_steps: 3000
+eval:
+  batch_size: 48
+  num_samples_per_task: null
+  compute_lpips: false
+  tsne:
+    enabled: true
+    every_steps: 2000
+    samples_per_task: 50
+    perplexity: 30
+    seed: 42
+    iterations: 1500
+    plot_python: /data/yhmi/miniforge3/envs/restoration-cu128/bin/python
+    plot_script: /home/yhmi/SD-AiO/tools/plot_classifier_tsne.py
+keep_last_checkpoints: 5
